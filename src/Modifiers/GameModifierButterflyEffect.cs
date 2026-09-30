@@ -1,3 +1,4 @@
+using Arcfrag.Core.Contract;
 using SwiftlyS2.Shared.Events;
 using SwiftlyS2.Shared.Players;
 
@@ -64,6 +65,10 @@ public sealed class GameModifierButterflyEffect : GameModifierBase
     private readonly Dictionary<int, GameModifierBase> _granted = [];
     private readonly Dictionary<int, float> _nextSwapTime = [];
     private readonly Dictionary<int, SpinState> _spins = [];
+
+    /// <summary>Arcfrag HUD only: the widget reads LANDED for a moment after a roll lands.</summary>
+    private readonly Dictionary<int, float> _landedUntil = [];
+    private const float LandedDisplaySeconds = 1.5f;
 
     public GameModifierButterflyEffect()
     {
@@ -157,6 +162,7 @@ public sealed class GameModifierButterflyEffect : GameModifierBase
         _granted.Clear();
         _nextSwapTime.Clear();
         _spins.Clear();
+        _landedUntil.Clear();
     }
 
     /// <summary>Removes the dictionary entry BEFORE revoking, so the OnSlotsRemoved that revoking may trigger on the granted modifier can't re-enter this and revoke it a second time.</summary>
@@ -246,8 +252,11 @@ public sealed class GameModifierButterflyEffect : GameModifierBase
             if (spin.Target is { } target && Runtime.GrantModifierToSlot(target, slot))
             {
                 _granted[slot] = target;
+                _landedUntil[slot] = now + LandedDisplaySeconds;
 
-                if (Runtime.Config.ButterflyEffect.AnnounceSwaps)
+                // One-off announcement: a toast on the Arcfrag HUD, the chat line without it.
+                if (Runtime.Config.ButterflyEffect.AnnounceSwaps &&
+                    !Runtime.TryToast(slot, HudTitle, "Now: " + CSRollUtils.PlainTextFromChatColors(CSRollUtils.GetModifierDisplayName(Core, target)), ModeHudTone.Chaos))
                 {
                     CSRollUtils.PrintTitleToChatColored(Core, player, $"Butterfly Effect: [gold]{CSRollUtils.GetModifierDisplayName(Core, target)}[default]");
                 }
@@ -271,6 +280,8 @@ public sealed class GameModifierButterflyEffect : GameModifierBase
         // get THIS roll's landing moment, or the timer would jump forward a full interval mid-roll.
         var landingRemaining = Math.Max(0f, _nextSwapTime.GetValueOrDefault(slot, now) - Runtime.Config.ButterflyEffect.SwapIntervalSeconds - now);
         SetHud(slot, BuildStatusHtml(flashed, landingRemaining), HudPriority);
+        SetStatus(slot, new ModeHudWidget(ModeHudWidgetKind.Rotor, HudTitle, CSRollUtils.PlainTextFromChatColors(flashed), "", 100, ModeHudState.Spinning,
+            Before: RandomName(pool), After: RandomName(pool)), HudPriority);
         CSRollUtils.PlaySoundToPlayer(player, Runtime.Config.SpinReveal.TickSoundEventName, Runtime.Config.SpinReveal.TickSoundVolume);
 
         spin.FrameIndex++;
@@ -294,7 +305,19 @@ public sealed class GameModifierButterflyEffect : GameModifierBase
 
         var remaining = Math.Max(0f, _nextSwapTime.GetValueOrDefault(slot, now) - now);
         SetHud(slot, BuildStatusHtml(activeName, remaining), HudPriority);
+
+        // Arcfrag HUD widget: the granted modifier with the countdown to the next re-roll, LANDED right after a roll.
+        var name = granted is not null ? CSRollUtils.PlainTextFromChatColors(activeName) : "—";
+        var landed = _landedUntil.TryGetValue(slot, out var until) && now < until && now + LandedDisplaySeconds >= until;
+        var interval = Math.Max(0.01f, Runtime.Config.ButterflyEffect.SwapIntervalSeconds);
+        SetStatus(slot, landed
+            ? new ModeHudWidget(ModeHudWidgetKind.Rotor, HudTitle, name, "Landed", 100, ModeHudState.Landed)
+            : new ModeHudWidget(ModeHudWidgetKind.Rotor, HudTitle, name, $"Reroll in {Math.Ceiling(remaining):0}s",
+                ModifierLook.Percent(remaining / interval), granted is null ? ModeHudState.Empty : ModeHudState.None), HudPriority);
     }
+
+    private string RandomName(IReadOnlyList<GameModifierBase> pool)
+        => pool.Count > 0 ? CSRollUtils.PlainTextFromChatColors(CSRollUtils.GetModifierDisplayName(Core, pool[Random.Shared.Next(pool.Count)])) : "";
 
     /// <summary>
     /// Two-line HUD - title, then the currently granted modifier with its countdown to the right -
@@ -325,5 +348,6 @@ public sealed class GameModifierButterflyEffect : GameModifierBase
         _granted.Remove(@event.PlayerId);
         _nextSwapTime.Remove(@event.PlayerId);
         _spins.Remove(@event.PlayerId);
+        _landedUntil.Remove(@event.PlayerId);
     }
 }

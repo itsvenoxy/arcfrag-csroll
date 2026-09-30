@@ -10,6 +10,22 @@ Each round all players roll a random modifiers that apply for a round.
 |--|--|
 | ![demo](./demo.gif) | ![demo](./demo2.gif) |
 
+## Arcfrag UI HUD (fork: `-arcfrag.1`)
+
+With [ArcfragCore](https://github.com/itsvenoxy/arcfrag-core) 0.8.0+ and the Arcfrag UI Workshop addon on the server, CSRoll
+draws its HUD on Arcfrag's Panorama panels instead of center HTML (shared interface `arcfrag:core_hud`, `IPlatformModeHud`):
+
+- **Roll reveal** (top centre): slot reel "ROLLING… / ROUND n", then 1–3 cards (icon, name, Buff/Nerf/Chaos/Ability tag,
+  description decoding letter by letter). A modifier added mid-round gets the gold "NEW MODIFIER" card.
+- **Modifier bar** (left): chip with the player's modifiers + up to 3 widgets (Vanish/Recall/Flanker = Ability,
+  Jetpack/Conditional Invisibility = Gauge, Regeneration = Value, Weapon Roulette/Butterfly Effect = Rotor, Mimic = Stolen).
+- **Spectator panel** (left, while dead): who you watch and their modifiers.
+- Butterfly swaps, Mimic steals and Revive procs are toasts. The "Your modifiers:" chat summary stays.
+
+Category and tone per modifier: `src/Core/ModifierLook.cs`. Without ArcfragCore (or without the addon, or outside
+ArcfragCore's `HudModes`) everything stays center HTML as upstream. `lib/` holds the ArcfragCore contract (compile reference,
+shipped as `resources/exports`); keep it at the ArcfragCore version of the servers.
+
 ## Modifier List
 
 | Modifier | Description |

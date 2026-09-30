@@ -1,3 +1,4 @@
+using Arcfrag.Core.Contract;
 using SwiftlyS2.Shared.Events;
 using SwiftlyS2.Shared.GameEventDefinitions;
 using SwiftlyS2.Shared.GameHooks;
@@ -262,6 +263,7 @@ public sealed class GameModifierVanish : GameModifierInvisibleBase
         float ratio;
         string barColor;
         string statusLine;
+        ModeHudWidget widget;
 
         if (_vanishEndsAt.TryGetValue(slot, out var endsAt))
         {
@@ -270,6 +272,8 @@ public sealed class GameModifierVanish : GameModifierInvisibleBase
             ratio = Math.Clamp((endsAt - now) / duration, 0f, 1f);
             barColor = "lime";
             statusLine = "<span color=\"lime\" class=\"fontWeight-Bold\">Active</span>";
+            widget = new ModeHudWidget(ModeHudWidgetKind.Ability, HudTitle, "ACTIVE", ModifierLook.Seconds(endsAt - now) + " left",
+                ModifierLook.Percent(ratio), ModeHudState.Active, Key: "F");
         }
         else if (readyAt > now)
         {
@@ -278,6 +282,8 @@ public sealed class GameModifierVanish : GameModifierInvisibleBase
             ratio = Math.Clamp((cooldown - (readyAt - now)) / cooldown, 0f, 1f);
             barColor = CSRollUtils.GetGaugeBarColor(ratio);
             statusLine = "<span color=\"red\" class=\"fontWeight-Bold\">Charging</span>";
+            widget = new ModeHudWidget(ModeHudWidgetKind.Ability, HudTitle, ModifierLook.Seconds(readyAt - now), "Cooldown",
+                ModifierLook.Percent(ratio), ModeHudState.Cooldown, Key: "F");
         }
         else
         {
@@ -286,6 +292,8 @@ public sealed class GameModifierVanish : GameModifierInvisibleBase
             statusLine = "<span class=\"fontWeight-Bold\">Press </span>" +
                          "<span color=\"gold\" class=\"fontWeight-Bold\">Inspect Weapon</span>" +
                          "<span class=\"fontWeight-Bold\"> to activate</span>";
+            // F is Inspect Weapon's default bind; the real bind can't be read server-side.
+            widget = new ModeHudWidget(ModeHudWidgetKind.Ability, HudTitle, "READY", "Press F", 100, ModeHudState.Ready, Key: "F");
         }
 
         var html = "<span color=\"gold\" class=\"fontWeight-Bold\">Vanish</span><br/>" +
@@ -293,6 +301,7 @@ public sealed class GameModifierVanish : GameModifierInvisibleBase
                    statusLine;
 
         SetHud(slot, html);
+        SetStatus(slot, widget);
     }
 
 

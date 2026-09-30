@@ -198,6 +198,16 @@ public abstract class GameModifierBase
     /// <summary>Publishes this modifier's persistent HUD block for one player. See ModifierRuntime._hudSections for why modifiers must not call SendCenterHTML directly for this.</summary>
     protected void SetHud(int slot, string html, int priority = 0) => Runtime.SetHudSection(this, slot, html, priority);
 
+    /// <summary>
+    /// Publishes this modifier's structured status (a widget on the Arcfrag UI HUD's modifier bar) for one player - the
+    /// twin of SetHud. Modifiers publish both; the runtime draws the widget when ArcfragCore's mode HUD is available and
+    /// the HTML block otherwise. Expires like an HTML block, and is cleared with it.
+    /// </summary>
+    protected void SetStatus(int slot, Arcfrag.Core.Contract.ModeHudWidget widget, int priority = 0) => Runtime.SetStatusSection(this, slot, widget, priority);
+
+    /// <summary>The display name, plain (no chat color tokens) - the title of this modifier's HUD widget.</summary>
+    protected string HudTitle => CSRollUtils.PlainTextFromChatColors(CSRollUtils.GetModifierDisplayName(Core, this));
+
     /// <summary>Whether another modifier is currently drawing its own HUD block for this player - see ModifierRuntime.HasHudSection.</summary>
     protected bool HasHud(GameModifierBase other, int slot) => Runtime.HasHudSection(other, slot);
 

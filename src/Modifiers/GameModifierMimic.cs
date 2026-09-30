@@ -1,3 +1,4 @@
+using Arcfrag.Core.Contract;
 using SwiftlyS2.Shared.Events;
 using SwiftlyS2.Shared.GameEventDefinitions;
 using SwiftlyS2.Shared.Misc;
@@ -25,6 +26,9 @@ public sealed class GameModifierMimic : GameModifierBase
 {
     /// <summary>What each thief currently has stolen, so the next steal knows what to hand back first. One entry per slot, by design - see the class comment.</summary>
     private readonly Dictionary<int, GameModifierBase> _stolen = [];
+
+    /// <summary>Arcfrag HUD only: whom the current steal came from ("from nyx" on the widget).</summary>
+    private readonly Dictionary<int, string> _stolenFrom = [];
 
     private Guid _deathHookId;
 
@@ -83,6 +87,7 @@ public sealed class GameModifierMimic : GameModifierBase
         }
 
         _stolen.Clear();
+        _stolenFrom.Clear();
     }
 
     /// <summary>Removes the dictionary entry BEFORE revoking, so the OnSlotsRemoved that revoking may trigger on the stolen modifier can't re-enter this and revoke it a second time.</summary>
@@ -105,6 +110,20 @@ public sealed class GameModifierMimic : GameModifierBase
         {
             var header = "<span color=\"gold\" class=\"fontWeight-Bold\">Mimic</span>";
 
+            // Arcfrag HUD widget: the stolen modifier with its icon, or empty until the first steal.
+            if (_stolen.TryGetValue(player.Slot, out var current))
+            {
+                var look = ModifierLook.ToHud(Core, current, withDescription: false);
+                var from = _stolenFrom.TryGetValue(player.Slot, out var victimName) ? "from " + victimName : "";
+                SetStatus(player.Slot, new ModeHudWidget(ModeHudWidgetKind.Stolen, HudTitle + " · stolen", look.Name, from,
+                    Category: look.Category, Tone: look.Tone), HudPriority);
+            }
+            else
+            {
+                SetStatus(player.Slot, new ModeHudWidget(ModeHudWidgetKind.Stolen, HudTitle + " · stolen", "—", "Kill to steal one",
+                    State: ModeHudState.Empty), HudPriority);
+            }
+
             // See GameModifierButterflyEffect.PublishIdleHud - the name is omitted when the stolen
             // modifier draws its own block directly beneath, so it isn't printed twice in a row.
             if (_stolen.TryGetValue(player.Slot, out var stolen) && HasHud(stolen, player.Slot))
@@ -125,7 +144,11 @@ public sealed class GameModifierMimic : GameModifierBase
     }
 
     /// <summary>Slots are recycled by the next player to join, so a stale entry here would make OnDisabled revoke a modifier from someone who never stole anything.</summary>
-    private void OnClientDisconnected(IOnClientDisconnectedEvent @event) => _stolen.Remove(@event.PlayerId);
+    private void OnClientDisconnected(IOnClientDisconnectedEvent @event)
+    {
+        _stolen.Remove(@event.PlayerId);
+        _stolenFrom.Remove(@event.PlayerId);
+    }
 
     private HookResult OnPlayerDeath(EventPlayerDeath @event)
     {
@@ -190,8 +213,12 @@ public sealed class GameModifierMimic : GameModifierBase
         }
 
         _stolen[thief.Slot] = stolen;
+        _stolenFrom[thief.Slot] = victim.Name;
 
-        if (Runtime.Config.Mimic.AnnounceSteals)
+        // One-off announcement: a toast on the Arcfrag HUD, the chat line without it.
+        var stolenLook = ModifierLook.For(stolen.Name);
+        if (Runtime.Config.Mimic.AnnounceSteals && !Runtime.TryToast(thief.Slot, HudTitle,
+                $"Stole {CSRollUtils.PlainTextFromChatColors(CSRollUtils.GetModifierDisplayName(Core, stolen))} from {victim.Name}", stolenLook.Tone))
         {
             CSRollUtils.PrintTitleToChatColored(Core, thief, $"Mimicked [gold]{CSRollUtils.GetModifierDisplayName(Core, stolen)}[default] from [gold]{victim.Name}[default]!");
         }

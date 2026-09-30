@@ -1,3 +1,4 @@
+using Arcfrag.Core.Contract;
 using SwiftlyS2.Shared.Events;
 using SwiftlyS2.Shared.GameEventDefinitions;
 using SwiftlyS2.Shared.Misc;
@@ -244,6 +245,12 @@ public sealed class GameModifierFlanker : GameModifierBase
                    statusLine;
 
         SetHud(player.Slot, html);
+
+        var cooldown = Math.Max(0.01f, Runtime.Config.Flanker.CooldownSeconds);
+        SetStatus(player.Slot, remaining > 0f
+            ? new ModeHudWidget(ModeHudWidgetKind.Ability, HudTitle, ModifierLook.Seconds(remaining), "Cooldown",
+                ModifierLook.Percent((cooldown - remaining) / cooldown), ModeHudState.Cooldown, Key: "F")
+            : new ModeHudWidget(ModeHudWidgetKind.Ability, HudTitle, "READY", "Press F", 100, ModeHudState.Ready, Key: "F"));
     }
 
     private void OnClientDisconnected(IOnClientDisconnectedEvent @event)

@@ -1,3 +1,4 @@
+using Arcfrag.Core.Contract;
 using SwiftlyS2.Shared.Events;
 using SwiftlyS2.Shared.GameEventDefinitions;
 using SwiftlyS2.Shared.Misc;
@@ -324,6 +325,14 @@ public sealed class GameModifierRecall : GameModifierBase
                    statusLine;
 
         SetHud(slot, html);
+
+        var widget = _rewinds.ContainsKey(slot)
+            ? new ModeHudWidget(ModeHudWidgetKind.Ability, HudTitle, "REWIND", "Rewinding", ModifierLook.Percent(ratio), ModeHudState.Active, Key: "Inspect")
+            : readyAt > now
+                ? new ModeHudWidget(ModeHudWidgetKind.Ability, HudTitle, ModifierLook.Seconds(readyAt - now), "Cooldown",
+                    ModifierLook.Percent(ratio), ModeHudState.Cooldown, Key: "Inspect")
+                : new ModeHudWidget(ModeHudWidgetKind.Ability, HudTitle, "READY", "Press Inspect", 100, ModeHudState.Ready, Key: "Inspect");
+        SetStatus(slot, widget);
     }
 
     /// <summary>History is per-life - rewinding into where you stood before you died would teleport you across the map.</summary>

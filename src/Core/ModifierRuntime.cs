@@ -15,7 +15,7 @@ namespace CSRoll.Core;
 /// Owns the registered/active modifier lists and all add/remove/toggle/random-round business
 /// logic. Direct port of CSRollCore's non-command, non-game-event methods.
 /// </summary>
-public sealed class ModifierRuntime
+public sealed partial class ModifierRuntime
 {
     private readonly ISwiftlyCore _core;
     private readonly ICvarRollbackService _cvarService;
@@ -137,6 +137,8 @@ public sealed class ModifierRuntime
         _modifierHudSuppressedUntil = 0f;
         _lastSpectatorHudUpdateTime.Clear();
         _lastModifierHudUpdateTime.Clear();
+        _lastModeHudRefreshTime = float.NegativeInfinity;
+        _lastModeSpecUpdateTime.Clear();
     }
 
     /// <summary>Extends the HUD blackout to at least <paramref name="seconds"/> from now - never shortens an existing one, so overlapping reveals can't cut each other short.</summary>
@@ -307,6 +309,25 @@ public sealed class ModifierRuntime
 
         RemoveAllModifiers();
 
+        // Take the Arcfrag HUD panels down with the plugin - nothing would ever refresh or hide them otherwise.
+        if (UseModeHud)
+        {
+            foreach (var slot in _modeBarSent.ToList())
+            {
+                try { _modeHud!.SetModBar(slot, null); } catch (Exception) { /* ArcfragCore going away too */ }
+            }
+
+            foreach (var slot in _modeSpecShown.ToList())
+            {
+                TrySetSpectator(slot, null);
+            }
+        }
+
+        _statusSections.Clear();
+        _modeBarSent.Clear();
+        _modeSpecShown.Clear();
+        _lastModeSpecUpdateTime.Clear();
+
         foreach (var modifier in _registeredModifiers)
         {
             modifier.Unregister();
@@ -348,6 +369,7 @@ public sealed class ModifierRuntime
         // have to go with them or the newcomer inherits a stale panel.
         _hudSections.Remove(@event.PlayerId);
         _lastModifierHudUpdateTime.Remove(@event.PlayerId);
+        ForgetModeHudSlot(@event.PlayerId);
 
         // Iterating a copy: an orphaned modifier is removed from _activeModifiers inside this loop.
         foreach (var modifier in _activeModifiers.ToList())
@@ -389,6 +411,13 @@ public sealed class ModifierRuntime
     /// </summary>
     private void RefreshSpectatorHud()
     {
+        // Arcfrag UI HUD: its own spectator panel instead of center HTML (it also hides the panel again).
+        if (UseModeHud)
+        {
+            RefreshModeHudSpectators();
+            return;
+        }
+
         if (!Config.SpectatorHud.Enabled || _activeModifiers.Count == 0)
         {
             return;
@@ -769,6 +798,12 @@ public sealed class ModifierRuntime
                 continue;
             }
 
+            if (UseModeHud)
+            {
+                ShowModeRoll(slot, modifiers, late: false);
+                continue;
+            }
+
             _core.PlayerManager.GetPlayer(slot)?.SendCenterHTML(CSRollUtils.BuildActivatingModifiersHtml(_core, modifiers, Config.SpinReveal), 6000);
         }
     }
@@ -886,7 +921,15 @@ public sealed class ModifierRuntime
 
             if (Config.ShowCentreMsg && _core.PlayerManager.GetPlayer(slot) is { IsValid: true } player)
             {
-                player.SendCenterHTML(CSRollUtils.BuildActivatingModifiersHtml(_core, [modifier], Config.SpinReveal), 6000);
+                // Joined mid-round: the Arcfrag HUD's gold "new modifier" card.
+                if (UseModeHud)
+                {
+                    ShowModeRoll(slot, [modifier], late: true);
+                }
+                else
+                {
+                    player.SendCenterHTML(CSRollUtils.BuildActivatingModifiersHtml(_core, [modifier], Config.SpinReveal), 6000);
+                }
             }
         }
 
@@ -974,12 +1017,14 @@ public sealed class ModifierRuntime
         {
             _hudSections.Remove(slot);
         }
+
+        ClearStatusSection(owner, slot);
     }
 
     /// <summary>Retracts every block a modifier owns, for every player. Called automatically from GameModifierBase.Deactivate so no modifier can leave a stale block on screen after it ends.</summary>
     public void ClearHudSections(GameModifierBase owner)
     {
-        foreach (var slot in _hudSections.Keys.ToList())
+        foreach (var slot in _hudSections.Keys.Union(_statusSections.Keys).ToList())
         {
             ClearHudSection(owner, slot);
         }
@@ -992,6 +1037,13 @@ public sealed class ModifierRuntime
     /// </summary>
     private void RefreshModifierHud()
     {
+        // Arcfrag UI HUD: structured widgets on the modifier bar instead of the composed center HTML.
+        if (UseModeHud)
+        {
+            RefreshModeHudBars();
+            return;
+        }
+
         if (_hudSections.Count == 0)
         {
             return;
@@ -1413,7 +1465,18 @@ public sealed class ModifierRuntime
 
         if (Config.ShowCentreMsg)
         {
-            CSRollUtils.ShowMessageCentreAll(_core, CSRollUtils.BuildActivatingModifiersHtml(_core, modifiers, Config.SpinReveal), 6000);
+            if (UseModeHud)
+            {
+                // Added outside the round-start roll (admin toggle / add random): the "new modifier" card.
+                foreach (var player in _core.PlayerManager.GetAllValidPlayers())
+                {
+                    ShowModeRoll(player.Slot, modifiers, late: true);
+                }
+            }
+            else
+            {
+                CSRollUtils.ShowMessageCentreAll(_core, CSRollUtils.BuildActivatingModifiersHtml(_core, modifiers, Config.SpinReveal), 6000);
+            }
         }
 
         foreach (var player in _core.PlayerManager.GetAllValidPlayers())
@@ -1563,7 +1626,11 @@ public sealed class ModifierRuntime
             }
         }
 
-        if (Config.ShowCentreMsg)
+        if (Config.ShowCentreMsg && UseModeHud)
+        {
+            PlayModeRollAll(modifiers, Reveal);
+        }
+        else if (Config.ShowCentreMsg)
         {
             PlaySpinThenRevealAll(
                 () => CSRollUtils.BuildActivatingModifiersHtml(_core, modifiers, Config.SpinReveal),
@@ -1628,7 +1695,11 @@ public sealed class ModifierRuntime
                 }
             }
 
-            if (Config.ShowCentreMsg)
+            if (Config.ShowCentreMsg && UseModeHud)
+            {
+                PlayModeRoll(slot, modifiers, Reveal);
+            }
+            else if (Config.ShowCentreMsg)
             {
                 PlaySpinThenReveal(
                     slot,

@@ -1,3 +1,4 @@
+using Arcfrag.Core.Contract;
 using Microsoft.Extensions.Logging;
 
 using SwiftlyS2.Shared.Events;
@@ -312,6 +313,11 @@ public sealed class GameModifierJetpack : GameModifierBase
 
         _nextGaugeUpdateTime[player.Slot] = now + interval;
         SetHud(player.Slot, BuildFuelGaugeHtml(fuel, maxFuel));
+
+        // Gauge colors (gold / Warn / Bad) follow the percent on ArcfragCore's side.
+        var percent = ModifierLook.Percent(maxFuel > 0f ? fuel / maxFuel : 0f);
+        var hint = _isHoldingSpace.GetValueOrDefault(player.Slot) ? "Flying" : percent <= 25 ? "Refuels on ground" : "Hold to fly";
+        SetStatus(player.Slot, new ModeHudWidget(ModeHudWidgetKind.Gauge, HudTitle + " · fuel", $"{percent}%", hint, percent, Key: "Space"));
     }
 
     private static string BuildFuelGaugeHtml(float fuel, float maxFuel)

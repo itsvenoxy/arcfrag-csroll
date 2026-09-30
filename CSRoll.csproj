@@ -10,6 +10,7 @@
     <AssemblyName>CSRoll</AssemblyName>
     <OutputPath>$(MSBuildThisFileDirectory)build/</OutputPath>
     <PublishDir>$(OutputPath)publish/CSRoll</PublishDir>
+    <Version>1.37.3-arcfrag.1</Version>
   </PropertyGroup>
 
   <ItemGroup>
@@ -25,6 +26,25 @@
     <Content Include="resources/gamedata/**/*;resources/templates/**/*;resources/translations/**/*;resources/ConVarModifiers/**/*;resources/ModifierConfig/**/*">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      ArcfragCore's shared contract (IPlatformModeHud = shared interface "arcfrag:core_hud", draws the Arcfrag UI HUD).
+      Vendored from arcfrag-core (dotnet build src/ArcfragCore.Contract -c Release) so this repo builds on its own.
+      Like every Arcfrag mode plugin: referenced with Private=false (no private copy next to CSRoll.dll, which would give
+      CSRoll and ArcfragCore different types) and shipped as resources/exports, which SwiftlyS2 loads once for all plugins,
+      so CSRoll also loads without ArcfragCore. Keep lib/ in sync with the ArcfragCore version on the servers.
+    -->
+    <Reference Include="ArcfragCore.Contract">
+      <HintPath>$(MSBuildThisFileDirectory)lib/ArcfragCore.Contract.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Arcfrag.Contracts">
+      <HintPath>$(MSBuildThisFileDirectory)lib/Arcfrag.Contracts.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <None Include="lib/ArcfragCore.Contract.dll;lib/Arcfrag.Contracts.dll" Link="resources/exports/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

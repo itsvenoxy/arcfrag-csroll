@@ -1,3 +1,4 @@
+using Arcfrag.Core.Contract;
 using Microsoft.Extensions.Logging;
 
 using SwiftlyS2.Shared.Events;
@@ -105,7 +106,11 @@ public sealed class GameModifierRevive : GameModifierBase
 
         // Unambiguous confirmation it actually fired - a percentage this size is still a coin flip,
         // so without this it's hard to tell "not working" apart from "just hasn't rolled yet".
-        CSRollUtils.PrintTitleToChat(Core, victim, $"You survived a lethal hit! (chance was {chance:0.#}%)");
+        // One-off announcement: a toast on the Arcfrag HUD, the chat line without it.
+        if (!Runtime.TryToast(slot, HudTitle, $"You survived a lethal hit! ({chance.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture)}% chance)", "Success"))
+        {
+            CSRollUtils.PrintTitleToChat(Core, victim, $"You survived a lethal hit! (chance was {chance:0.#}%)");
+        }
         Core.Logger.LogInformation("[CSRoll] Revive triggered for slot {Slot} at {Chance}% chance.", slot, chance);
 
         var reviveCount = _reviveCount.GetValueOrDefault(slot, 0) + 1;

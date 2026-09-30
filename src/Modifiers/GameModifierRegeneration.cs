@@ -1,3 +1,4 @@
+using Arcfrag.Core.Contract;
 using SwiftlyS2.Shared.Events;
 using SwiftlyS2.Shared.Players;
 
@@ -142,6 +143,14 @@ public sealed class GameModifierRegeneration : GameModifierBase
                    $"<span color=\"{color}\" class=\"fontWeight-Bold\">{displayedRate:0} HP/s</span>";
 
         SetHud(slot, html);
+
+        var boosted = displayedRate >= Runtime.Config.Regeneration.StationaryRatePerSecond;
+        var boost = Runtime.Config.Regeneration.MovingRatePerSecond > 0f
+            ? Runtime.Config.Regeneration.StationaryRatePerSecond / Runtime.Config.Regeneration.MovingRatePerSecond
+            : 0f;
+        SetStatus(slot, new ModeHudWidget(ModeHudWidgetKind.Value, HudTitle, $"{displayedRate:0} HP/s",
+            boosted ? $"Standing still ×{boost.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture)}" : "Regenerating",
+            State: boosted ? ModeHudState.Boosted : ModeHudState.None));
     }
 
     private void OnClientDisconnected(IOnClientDisconnectedEvent @event)

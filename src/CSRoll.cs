@@ -18,7 +18,7 @@ public partial class CSRoll : BasePlugin
 {
     // Single source of truth for the version - also referenced in the PluginMetadata attribute
     // above and logged on every load, so the running build is always identifiable in the console.
-    private const string PluginVersion = "1.37.3";
+    private const string PluginVersion = "1.37.3-arcfrag.1";
 
     private IServiceProvider _serviceProvider = null!;
     private ICvarRollbackService _cvarService = null!;
@@ -36,9 +36,44 @@ public partial class CSRoll : BasePlugin
     {
     }
 
+    /// <summary>ArcfragCore's mode HUD (Arcfrag UI addon), or null - kept here because Load() can rebuild Runtime.</summary>
+    private Arcfrag.Core.Contract.IPlatformModeHud? _modeHud;
+
+    /// <summary>
+    /// Picks up ArcfragCore's IPlatformModeHud ("arcfrag:core_hud"). SwiftlyS2 runs this again whenever the plugin set
+    /// changes (either plugin reloaded, ArcfragCore unloaded), so the value is always replaced, never kept. Without it (or
+    /// while it reports Available = false) CSRoll draws its own center-HTML HUD exactly as before.
+    /// </summary>
     public override void UseSharedInterface(IInterfaceManager interfaceManager)
     {
+        try
+        {
+            _modeHud = TryGetModeHud(interfaceManager);
+        }
+        catch (Exception error) when (error is FileNotFoundException or FileLoadException or TypeLoadException)
+        {
+            // ArcfragCore.Contract is not loadable, or an older copy (before ArcfragCore 0.8.0, no IPlatformModeHud) won
+            // SwiftlyS2's one-copy-per-name export load. Center-HTML fallback - but the modifiers' Arcfrag widgets need the
+            // new contract too, so this has to be fixed by updating ArcfragCore.
+            _modeHud = null;
+            Core.Logger.LogError(error, "[CSRoll] ArcfragCore.Contract on this server has no IPlatformModeHud - update ArcfragCore to 0.8.0 or later and restart the server");
+        }
+
+        if (Runtime is not null)
+        {
+            Runtime.ModeHud = _modeHud;
+        }
+
+        Core.Logger.LogInformation(_modeHud is null
+            ? "[CSRoll] ArcfragCore mode HUD not found - using center HTML"
+            : "[CSRoll] ArcfragCore mode HUD found (arcfrag:core_hud) - Arcfrag UI panels when available, center HTML otherwise");
     }
+
+    /// <summary>The only method naming the contract's interface in this class; not inlined, so a missing assembly fails here.</summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static Arcfrag.Core.Contract.IPlatformModeHud? TryGetModeHud(IInterfaceManager interfaceManager)
+        => interfaceManager.TryGetSharedInterface<Arcfrag.Core.Contract.IPlatformModeHud>(
+            Arcfrag.Core.Contract.PlatformCoreCapabilities.PlatformModeHudName, out var hud) ? hud : null;
 
     public override void Load(bool hotReload)
     {
@@ -71,6 +106,7 @@ public partial class CSRoll : BasePlugin
         _cvarService.Install();
 
         Runtime = new ModifierRuntime(Core, Config, _cvarService);
+        Runtime.ModeHud = _modeHud;
         Runtime.Initialise(BuildModifierFactories());
 
         InitializeCommands();

@@ -1,3 +1,4 @@
+using Arcfrag.Core.Contract;
 using Microsoft.Extensions.Logging;
 
 using SwiftlyS2.Shared.Events;
@@ -340,6 +341,10 @@ public sealed class GameModifierConditionalInvisibility : GameModifierInvisibleB
             : alpha >= VisibleAlpha ? ("VISIBLE", "red") : ("FADING", "yellow");
 
         SetHud(slot, CSRollUtils.BuildGaugeHtml(label, labelColor, concealment, CSRollUtils.GetGaugeBarColor(concealment), GaugeBarWidth));
+
+        var percent = ModifierLook.Percent(concealment);
+        var side = alpha <= InvisibleAlpha ? "Hidden" : alpha >= VisibleAlpha ? "Visible" : "Partly visible";
+        SetStatus(slot, new ModeHudWidget(ModeHudWidgetKind.Gauge, "Invisibility · concealment", $"{percent}%", side, percent));
     }
 
     private void MarkSoundMade(int slot) => _lastSoundTime[slot] = Core.Engine.GlobalVars.CurrentTime;

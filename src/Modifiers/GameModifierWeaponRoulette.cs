@@ -1,3 +1,4 @@
+using Arcfrag.Core.Contract;
 using Microsoft.Extensions.Logging;
 
 using SwiftlyS2.Shared.Events;
@@ -73,6 +74,10 @@ public sealed class GameModifierWeaponRoulette : GameModifierRemoveWeapons
     private readonly Dictionary<int, string> _currentWeaponName = [];
     private readonly Dictionary<int, float> _lastHtmlUpdateTime = [];
     private readonly Dictionary<int, SpinState> _spins = [];
+
+    /// <summary>Arcfrag HUD only: the widget reads LANDED for a moment after a spin lands, then returns to the countdown.</summary>
+    private readonly Dictionary<int, float> _landedUntil = [];
+    private const float LandedDisplaySeconds = 1.5f;
 
     /// <summary>
     /// -1 means "not yet scheduled". OnRoundStart's "re-apply active modifiers in case anything was
@@ -204,6 +209,7 @@ public sealed class GameModifierWeaponRoulette : GameModifierRemoveWeapons
         // reroll timer (or a genuinely new player with no cached weapon yet) starts a new spin now.
         _lastHtmlUpdateTime.Clear();
         _spins.Clear();
+        _landedUntil.Clear();
         base.OnDisabled();
     }
 
@@ -337,6 +343,8 @@ public sealed class GameModifierWeaponRoulette : GameModifierRemoveWeapons
 
             var remaining = Math.Max(0f, _nextRerollTime - now);
             SetHud(player.Slot, BuildStatusHtml(spin.FinalWeaponName, remaining));
+            _landedUntil[player.Slot] = now + LandedDisplaySeconds;
+            SetStatus(player.Slot, BuildStatus(spin.FinalWeaponName, remaining, now, player.Slot));
 
             if (Runtime.DebugMode)
             {
@@ -375,6 +383,10 @@ public sealed class GameModifierWeaponRoulette : GameModifierRemoveWeapons
         // instead of counting smoothly down to zero as the new weapon lands.
         var landingRemaining = Math.Max(0f, _nextRerollTime - Runtime.Config.WeaponRoulette.RerollIntervalSeconds - now);
         SetHud(player.Slot, BuildStatusHtml(randomName, landingRemaining));
+        SetStatus(player.Slot, new ModeHudWidget(ModeHudWidgetKind.Rotor, HudTitle, CSRollUtils.GetFriendlyWeaponName(randomName), "", 100,
+            ModeHudState.Spinning,
+            Before: CSRollUtils.GetFriendlyWeaponName(CSRollUtils.GetRandomMainWeaponName(spin.Team)),
+            After: CSRollUtils.GetFriendlyWeaponName(CSRollUtils.GetRandomMainWeaponName(spin.Team))));
         CSRollUtils.PlaySoundToPlayer(player, Runtime.Config.SpinReveal.TickSoundEventName, Runtime.Config.SpinReveal.TickSoundVolume);
 
         spin.FrameIndex++;
@@ -403,6 +415,21 @@ public sealed class GameModifierWeaponRoulette : GameModifierRemoveWeapons
         var weaponName = _currentWeaponName.GetValueOrDefault(player.Slot, "-");
         var remaining = Math.Max(0f, _nextRerollTime - now);
         SetHud(player.Slot, BuildStatusHtml(weaponName, remaining));
+        SetStatus(player.Slot, BuildStatus(weaponName, remaining, now, player.Slot));
+    }
+
+    /// <summary>Arcfrag HUD widget between spins: the weapon with the countdown (bar drains to the next swap), LANDED right after a spin.</summary>
+    private ModeHudWidget BuildStatus(string weaponName, float secondsRemaining, float now, int slot)
+    {
+        var name = weaponName == "-" ? "—" : CSRollUtils.GetFriendlyWeaponName(weaponName);
+        if (_landedUntil.TryGetValue(slot, out var until) && now < until && now + LandedDisplaySeconds >= until)
+        {
+            return new ModeHudWidget(ModeHudWidgetKind.Rotor, HudTitle, name, "Landed", 100, ModeHudState.Landed);
+        }
+
+        var interval = Math.Max(0.01f, Runtime.Config.WeaponRoulette.RerollIntervalSeconds);
+        return new ModeHudWidget(ModeHudWidgetKind.Rotor, HudTitle, name, $"Next swap in {Math.Ceiling(secondsRemaining):0}s",
+            ModifierLook.Percent(secondsRemaining / interval));
     }
 
     /// <summary>
@@ -434,5 +461,6 @@ public sealed class GameModifierWeaponRoulette : GameModifierRemoveWeapons
         _currentWeaponName.Remove(@event.PlayerId);
         _lastHtmlUpdateTime.Remove(@event.PlayerId);
         _spins.Remove(@event.PlayerId);
+        _landedUntil.Remove(@event.PlayerId);
     }
 }

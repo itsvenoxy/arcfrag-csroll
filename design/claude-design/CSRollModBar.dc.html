@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@500;600;700&display=swap">
+<link rel="stylesheet" href="arcfrag-csroll.css">
+</helmet>
+<div class="AfModBar">
+<sc-if value="{{ bar.hasChip }}" hint-placeholder-val="{{ true }}">
+<div class="{{ bar.chip.cls }}"><div class="AfModChipBar AfToneBar"></div><sc-for list="{{ bar.chip.icons }}" as="i" hint-placeholder-count="1"><div class="{{ i.cls }}"><img class="AfCrIcon" src="{{ i.src }}"></div></sc-for><span class="AfModName">{{ bar.chip.name }}</span><sc-if value="{{ bar.chip.hasTag }}" hint-placeholder-val="{{ true }}"><span class="AfModTagWrap"><span class="AfCrTag">{{ bar.chip.tag }}</span></span></sc-if></div>
+</sc-if>
+<sc-for list="{{ bar.widgets }}" as="w" hint-placeholder-count="1">
+<div class="{{ w.cls }}">
+<div class="AfModWHead"><span class="AfModWLabel">{{ w.label }}</span><span class="AfModWKeyWrap"><sc-if value="{{ w.hasKey }}" hint-placeholder-val="{{ false }}"><span class="AfKeyHint">{{ w.key }}</span></sc-if></span></div>
+<sc-if value="{{ w.plain }}" hint-placeholder-val="{{ true }}"><div class="AfModWMain"><span class="AfModWValue">{{ w.value }}</span><span class="AfModWSide">{{ w.side }}</span></div></sc-if>
+<sc-if value="{{ w.spin }}" hint-placeholder-val="{{ false }}"><div class="AfModWMain"><span class="AfSpinGhost">{{ w.g1 }}</span><span class="AfSpinCur">{{ w.value }}</span><span class="AfSpinGhost">{{ w.g2 }}</span></div></sc-if>
+<sc-if value="{{ w.stolen }}" hint-placeholder-val="{{ false }}"><div class="AfModWMain"><span class="AfStolenBox AfToneBox"><img class="AfStolenIcon" src="{{ w.icon }}"></span><span class="AfModWValue AfStolenName AfToneText">{{ w.value }}</span><span class="AfModWSide">{{ w.side }}</span></div></sc-if>
+<sc-if value="{{ w.hasBar }}" hint-placeholder-val="{{ true }}"><div class="AfCrBar"><div class="{{ w.fill }}"></div></div></sc-if>
+</div>
+</sc-for>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:340,&quot;height&quot;:380},&quot;bar&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;{hasChip:boolean, chip:object, widgets:object[]}&quot;}}"></script>
+</body>
+</html>

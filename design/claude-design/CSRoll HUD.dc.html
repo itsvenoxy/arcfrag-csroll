@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@500;600;700&display=swap">
+<link rel="stylesheet" href="arcfrag-ui.css">
+<link rel="stylesheet" href="arcfrag-csroll.css">
+<script src="./image-slot.js"></script>
+<style>body{margin:0;background:#111418}a{color:#ffd60a;text-decoration:none}a:hover{color:#ffe03d}</style>
+</helmet>
+<div style="min-height:100vh;background:#111418;color:#fff;font-family:'Barlow Semi Condensed','Arial Narrow',sans-serif;padding-bottom:60px">
+<header style="padding:40px 40px 28px">
+<div style="font-size:32px;font-weight:700;letter-spacing:5px">ARC<span style="color:#ffd60a">FRAG</span> · CSROLL HUD</div>
+<div style="margin-top:14px;font-size:14px;color:#9aa3ad;line-height:21px;max-width:860px;text-wrap:pretty">All components come from <span style="color:#fff;font-family:Consolas,Menlo,monospace">arcfrag-csroll.css</span>. Icons are 32px SVGs in <span style="color:#fff;font-family:Consolas,Menlo,monospace">icons/csroll/</span>. States are set with static classes. Full-frame compositions are at the bottom.</div>
+<div style="margin-top:16px;display:flex;flex-wrap:wrap;gap:8px 20px;font-size:14px;font-weight:700;letter-spacing:1px">
+<a href="#icons">Icons</a><a href="#s1">1 · Roll reveal</a><a href="#s2">2 · Modifier bar</a><a href="#s3">3 · Spectator</a><a href="#frames">1920×1080 in context</a>
+</div>
+</header>
+
+<section id="icons" style="padding:28px 40px;border-top:1px solid rgba(255,255,255,0.08)">
+<div style="font-size:20px;font-weight:700;letter-spacing:2px;margin-bottom:16px">CATEGORY ICONS</div>
+<div style="display:flex;flex-wrap:wrap;gap:12px">
+<sc-for list="{{ cats }}" as="c" hint-placeholder-count="6">
+<div style="width:150px;padding:16px;border-radius:12px;background:#1a1e24;border:1px solid rgba(255,255,255,0.08);box-sizing:border-box">
+<div style="display:flex;gap:14px;align-items:center"><img src="{{ c.white }}" style="width:32px;height:32px"><img src="{{ c.gold }}" style="width:32px;height:32px"></div>
+<div style="margin-top:12px;font-size:14px;font-weight:700;letter-spacing:1px;text-transform:uppercase">{{ c.name }}</div>
+<div style="margin-top:2px;font-size:11px;color:#5b636c;font-family:Consolas,Menlo,monospace">{{ c.file }}</div>
+<div style="margin-top:8px;font-size:12px;color:#9aa3ad;line-height:16px">{{ c.examples }}</div>
+</div>
+</sc-for>
+</div>
+</section>
+
+<section id="s1" style="padding:28px 40px;border-top:1px solid rgba(255,255,255,0.08)">
+<div style="font-size:20px;font-weight:700;letter-spacing:2px;margin-bottom:4px">1 · ROLL REVEAL</div>
+<div style="font-size:13px;color:#9aa3ad;margin-bottom:20px">Top center, top 100px, about 6 s. A = slot, B = reveal, C = late modifier.</div>
+<div style="border-radius:14px;padding:28px;background:radial-gradient(ellipse at 30% 20%, rgba(200,180,130,0.28) 0%, rgba(0,0,0,0) 55%),linear-gradient(180deg,#3a4049 0%,#47433a 55%,#1f1e1a 100%);display:flex;flex-direction:column;gap:32px;overflow-x:auto">
+<div style="display:flex;flex-wrap:wrap;gap:20px 24px">
+<sc-for list="{{ slots }}" as="s" hint-placeholder-count="3">
+<div style="flex:none">
+<div class="AfCrHud Visible AfCrPanel AfRollSlot">
+<div class="AfRollHead"><span class="AfRollHeadL">Rolling…</span><span class="AfRollHeadR">Round 4</span></div>
+<div class="{{ s.winCls }}"><div class="{{ s.reelCls }}"><sc-for list="{{ s.rows }}" as="r" hint-placeholder-count="3"><div class="{{ r.cls }}">{{ r.t }}</div></sc-for></div></div>
+<div class="AfCrBar"><div class="{{ s.fill }}"></div></div>
+</div>
+<div style="margin-top:8px;font-size:13px;font-weight:700">{{ s.cap }}</div>
+</div>
+</sc-for>
+</div>
+<sc-for list="{{ reveals }}" as="v" hint-placeholder-count="4">
+<div style="flex:none">
+<div class="AfReveal" style="display:inline-block">
+<span class="{{ v.eyebrowCls }}">{{ v.eyebrow }}</span>
+<sc-for list="{{ v.cards }}" as="c" hint-placeholder-count="1">
+<div class="{{ c.cls }}"><div class="AfToneBar"></div><div class="AfRollCardBody"><div class="AfRollCardHead"><div class="AfRollIconBox AfToneBox"><img class="AfCrIcon" src="{{ c.icon }}"></div><span class="AfRollCat">{{ c.cat }}</span><span class="AfRollTagWrap"><span class="AfCrTag">{{ c.tag }}</span></span></div><span class="AfRollName">{{ c.name }}</span><span class="AfRollDesc"><sc-for list="{{ c.desc }}" as="p" hint-placeholder-count="1"><span class="{{ p.cls }}">{{ p.t }}</span></sc-for></span></div></div>
+</sc-for>
+</div>
+<div style="margin-top:8px;font-size:13px;font-weight:700">{{ v.cap }}</div>
+</div>
+</sc-for>
+</div>
+</section>
+
+<section id="s2" style="padding:28px 40px;border-top:1px solid rgba(255,255,255,0.08)">
+<div style="font-size:20px;font-weight:700;letter-spacing:2px;margin-bottom:4px">2 · MODIFIER BAR</div>
+<div style="font-size:13px;color:#9aa3ad;margin-bottom:20px;text-wrap:pretty">Left edge, left 48px, top 340px, 320px wide. It updates up to 10 times per second; only fill width (P0–P10) and colors change.</div>
+<div style="border-radius:14px;padding:28px;background:radial-gradient(ellipse at 30% 20%, rgba(200,180,130,0.28) 0%, rgba(0,0,0,0) 55%),linear-gradient(180deg,#3a4049 0%,#47433a 55%,#1f1e1a 100%);display:flex;flex-direction:column;gap:30px;overflow-x:auto">
+<div>
+<div style="font-size:13px;font-weight:700;letter-spacing:2px;margin-bottom:10px">CHIP · TONES + MULTI</div>
+<div style="display:flex;flex-wrap:wrap;gap:12px 20px">
+<sc-for list="{{ chips }}" as="b" hint-placeholder-count="5">
+<div><dc-import name="CSRollModBar" bar="{{ b.bar }}" hint-size="320px,56px"></dc-import><div style="margin-top:6px;font-size:12px;font-weight:700">{{ b.cap }}</div></div>
+</sc-for>
+</div>
+</div>
+<sc-for list="{{ widgetRows }}" as="row" hint-placeholder-count="5">
+<div>
+<div style="font-size:13px;font-weight:700;letter-spacing:2px;margin-bottom:4px">{{ row.title }}</div>
+<div style="display:flex;flex-wrap:wrap;gap:6px 20px">
+<sc-for list="{{ row.cells }}" as="b" hint-placeholder-count="3">
+<div><dc-import name="CSRollModBar" bar="{{ b.bar }}" hint-size="320px,92px"></dc-import><div style="margin-top:6px;font-size:12px;font-weight:700">{{ b.cap }}</div></div>
+</sc-for>
+</div>
+</div>
+</sc-for>
+<div>
+<div style="font-size:13px;font-weight:700;letter-spacing:2px;margin-bottom:10px">FULL BAR · 0 / 1 / 3 WIDGETS</div>
+<div style="display:flex;flex-wrap:wrap;gap:12px 24px;align-items:flex-start">
+<sc-for list="{{ barVariants }}" as="b" hint-placeholder-count="3">
+<div><dc-import name="CSRollModBar" bar="{{ b.bar }}" hint-size="320px,200px"></dc-import><div style="margin-top:6px;font-size:12px;font-weight:700">{{ b.cap }}</div></div>
+</sc-for>
+</div>
+</div>
+</div>
+</section>
+
+<section id="s3" style="padding:28px 40px;border-top:1px solid rgba(255,255,255,0.08)">
+<div style="font-size:20px;font-weight:700;letter-spacing:2px;margin-bottom:4px">3 · SPECTATOR PANEL</div>
+<div style="font-size:13px;color:#9aa3ad;margin-bottom:20px">Shown while dead, same spot as the modifier bar (left 48px, top 340px), 380px wide.</div>
+<div style="border-radius:14px;padding:28px;background:radial-gradient(ellipse at 30% 20%, rgba(200,180,130,0.28) 0%, rgba(0,0,0,0) 55%),linear-gradient(180deg,#3a4049 0%,#47433a 55%,#1f1e1a 100%);display:flex;flex-wrap:wrap;gap:20px 24px;align-items:flex-start">
+<sc-for list="{{ specs }}" as="sp" hint-placeholder-count="3">
+<div>
+<div class="AfCrHud FromLeft Visible AfCrPanel AfSpec">
+<div class="AfSpecHead"><span class="AfSpecEyebrow">Spectating</span><span class="AfSpecCount">{{ sp.count }}</span></div>
+<span class="AfSpecName">{{ sp.name }}</span><span class="AfSpecMeta">{{ sp.meta }}</span>
+<sc-for list="{{ sp.mods }}" as="m" hint-placeholder-count="2"><div class="{{ m.cls }}"><div class="AfModIconBox AfToneBox"><img class="AfCrIcon" src="{{ m.src }}"></div><div class="AfSpecModText"><span class="AfSpecModName">{{ m.name }}</span><span class="AfSpecModDesc">{{ m.desc }}</span></div></div></sc-for>
+</div>
+<div style="margin-top:8px;font-size:12px;font-weight:700">{{ sp.cap }}</div>
+</div>
+</sc-for>
+</div>
+</section>
+
+<section id="frames" style="padding:28px 40px;border-top:1px solid rgba(255,255,255,0.08)">
+<div style="font-size:20px;font-weight:700;letter-spacing:2px;margin-bottom:4px">1920×1080 IN CONTEXT</div>
+<div style="display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center;margin-bottom:18px">
+<span style="font-size:13px;color:#9aa3ad"><b style="color:#ffd60a">Live ▶</b> plays the real timeline in a loop. Red = CS2 native, gold = existing Arcfrag HUD. You can drop a gameplay screenshot into each frame.</span>
+<div style="display:flex;align-items:center;gap:8px;cursor:pointer" onClick="{{ toggleZones }}"><div class="{{ zonesCls }}"><div class="AfToggleKnob"></div></div><span style="font-size:13px;color:#9aa3ad">Zones</span></div>
+</div>
+<div ref="{{ framesRef }}">
+
+<div style="font-size:14px;font-weight:700;letter-spacing:2px;margin-bottom:10px">SCREEN 1 · ROLL REVEAL</div>
+<div class="AfSegmented" style="margin-bottom:12px;flex-wrap:wrap">
+<sc-for list="{{ f1Tabs }}" as="t" hint-placeholder-count="8"><button class="{{ t.cls }}" onClick="{{ t.onClick }}">{{ t.label }}</button></sc-for>
+</div>
+<div style="position:relative;width:100%;height:{{ frameH }};border-radius:12px;overflow:hidden;border:1px solid rgba(255,255,255,0.1);margin-bottom:36px">
+<div style="position:absolute;left:0;top:0;width:1920px;height:1080px;transform-origin:0 0;transform:{{ frameTf }};background:radial-gradient(ellipse at 35% 30%, rgba(200,180,130,0.3) 0%, rgba(0,0,0,0) 55%),linear-gradient(180deg,#434a54 0%,#514b3e 50%,#221f1a 100%)">
+<image-slot id="csroll-frame-1" shape="rect" placeholder="Drop a CS2 gameplay screenshot (1920×1080)" style="position:absolute;left:0;top:0;width:1920px;height:1080px"></image-slot>
+<div style="position:absolute;left:0;top:0;width:1920px;height:1080px;background:rgba(0,0,0,0.35);pointer-events:none"></div>
+<sc-if value="{{ zones }}" hint-placeholder-val="{{ true }}"><sc-for list="{{ zoneList }}" as="z" hint-placeholder-count="8"><div style="position:absolute;left:{{ z.x }}px;top:{{ z.y }}px;width:{{ z.w }}px;height:{{ z.h }}px;border:2px dashed {{ z.c }};border-radius:{{ z.r }};box-sizing:border-box;padding:8px 10px;color:{{ z.c }};font:bold 14px Consolas,Menlo,monospace;pointer-events:none;display:flex;align-items:{{ z.align }};justify-content:{{ z.justify }}">{{ z.label }}</div></sc-for></sc-if>
+<div style="position:absolute;left:1512px;top:300px;pointer-events:none" class="AfToastStack"><sc-for list="{{ toasts }}" as="t" hint-placeholder-count="2"><div class="{{ t.cls }}"><div class="AfToastBar"></div><div class="AfToastIcon">{{ t.icon }}</div><div class="AfToastBody"><div class="AfToastTitle">{{ t.title }}</div><div class="AfToastText">{{ t.text }}</div></div></div></sc-for></div>
+<div style="position:absolute;left:0;top:100px;width:1920px;text-align:center;pointer-events:none;font-size:0">
+<sc-if value="{{ f1.rolling }}" hint-placeholder-val="{{ true }}">
+<div class="{{ f1.slotCls }}">
+<div class="AfRollHead"><span class="AfRollHeadL">Rolling…</span><span class="AfRollHeadR">Round 4</span></div>
+<div class="{{ f1.slot.winCls }}"><div class="{{ f1.slot.reelCls }}"><sc-for list="{{ f1.slot.rows }}" as="r" hint-placeholder-count="3"><div class="{{ r.cls }}">{{ r.t }}</div></sc-for></div></div>
+<div class="AfCrBar"><div class="{{ f1.slot.fill }}"></div></div>
+</div>
+</sc-if>
+<sc-if value="{{ f1.reveal }}" hint-placeholder-val="{{ false }}">
+<div class="AfReveal">
+<span class="{{ f1.deck.eyebrowCls }}">{{ f1.deck.eyebrow }}</span>
+<sc-for list="{{ f1.deck.cards }}" as="c" hint-placeholder-count="1">
+<div class="{{ c.cls }}"><div class="AfToneBar"></div><div class="AfRollCardBody"><div class="AfRollCardHead"><div class="AfRollIconBox AfToneBox"><img class="AfCrIcon" src="{{ c.icon }}"></div><span class="AfRollCat">{{ c.cat }}</span><span class="AfRollTagWrap"><span class="AfCrTag">{{ c.tag }}</span></span></div><span class="AfRollName">{{ c.name }}</span><span class="AfRollDesc"><sc-for list="{{ c.desc }}" as="p" hint-placeholder-count="1"><span class="{{ p.cls }}">{{ p.t }}</span></sc-for></span></div></div>
+</sc-for>
+</div>
+</sc-if>
+</div>
+<sc-if value="{{ f1.hasBar }}" hint-placeholder-val="{{ false }}"><div style="position:absolute;left:48px;top:340px;pointer-events:none"><dc-import name="CSRollModBar" bar="{{ f1.bar }}" hint-size="320px,200px"></dc-import></div></sc-if>
+</div>
+</div>
+
+<div style="font-size:14px;font-weight:700;letter-spacing:2px;margin-bottom:10px">SCREEN 2 · MODIFIER BAR</div>
+<div class="AfSegmented" style="margin-bottom:12px">
+<sc-for list="{{ f2Tabs }}" as="t" hint-placeholder-count="7"><button class="{{ t.cls }}" onClick="{{ t.onClick }}">{{ t.label }}</button></sc-for>
+</div>
+<div style="position:relative;width:100%;height:{{ frameH }};border-radius:12px;overflow:hidden;border:1px solid rgba(255,255,255,0.1);margin-bottom:36px">
+<div style="position:absolute;left:0;top:0;width:1920px;height:1080px;transform-origin:0 0;transform:{{ frameTf }};background:radial-gradient(ellipse at 60% 35%, rgba(150,170,190,0.3) 0%, rgba(0,0,0,0) 55%),linear-gradient(180deg,#3f4852 0%,#4b4a42 50%,#1f1f1b 100%)">
+<image-slot id="csroll-frame-2" shape="rect" placeholder="Drop a CS2 gameplay screenshot (1920×1080)" style="position:absolute;left:0;top:0;width:1920px;height:1080px"></image-slot>
+<div style="position:absolute;left:0;top:0;width:1920px;height:1080px;background:rgba(0,0,0,0.35);pointer-events:none"></div>
+<sc-if value="{{ zones }}" hint-placeholder-val="{{ true }}"><sc-for list="{{ zoneList }}" as="z" hint-placeholder-count="8"><div style="position:absolute;left:{{ z.x }}px;top:{{ z.y }}px;width:{{ z.w }}px;height:{{ z.h }}px;border:2px dashed {{ z.c }};border-radius:{{ z.r }};box-sizing:border-box;padding:8px 10px;color:{{ z.c }};font:bold 14px Consolas,Menlo,monospace;pointer-events:none;display:flex;align-items:{{ z.align }};justify-content:{{ z.justify }}">{{ z.label }}</div></sc-for></sc-if>
+<div style="position:absolute;left:1512px;top:300px;pointer-events:none" class="AfToastStack"><sc-for list="{{ toasts }}" as="t" hint-placeholder-count="2"><div class="{{ t.cls }}"><div class="AfToastBar"></div><div class="AfToastIcon">{{ t.icon }}</div><div class="AfToastBody"><div class="AfToastTitle">{{ t.title }}</div><div class="AfToastText">{{ t.text }}</div></div></div></sc-for></div>
+<div style="position:absolute;left:48px;top:340px;pointer-events:none"><dc-import name="CSRollModBar" bar="{{ f2bar }}" hint-size="320px,200px"></dc-import></div>
+</div>
+</div>
+
+<div style="font-size:14px;font-weight:700;letter-spacing:2px;margin-bottom:10px">SCREEN 3 · SPECTATOR</div>
+<div class="AfSegmented" style="margin-bottom:12px">
+<sc-for list="{{ f3Tabs }}" as="t" hint-placeholder-count="3"><button class="{{ t.cls }}" onClick="{{ t.onClick }}">{{ t.label }}</button></sc-for>
+</div>
+<div style="position:relative;width:100%;height:{{ frameH }};border-radius:12px;overflow:hidden;border:1px solid rgba(255,255,255,0.1)">
+<div style="position:absolute;left:0;top:0;width:1920px;height:1080px;transform-origin:0 0;transform:{{ frameTf }};background:radial-gradient(ellipse at 45% 30%, rgba(190,170,120,0.28) 0%, rgba(0,0,0,0) 55%),linear-gradient(180deg,#40464e 0%,#4d483b 50%,#201e1a 100%)">
+<image-slot id="csroll-frame-3" shape="rect" placeholder="Drop a CS2 spectator screenshot (1920×1080)" style="position:absolute;left:0;top:0;width:1920px;height:1080px"></image-slot>
+<div style="position:absolute;left:0;top:0;width:1920px;height:1080px;background:rgba(0,0,0,0.35);pointer-events:none"></div>
+<sc-if value="{{ zones }}" hint-placeholder-val="{{ true }}"><sc-for list="{{ zoneList3 }}" as="z" hint-placeholder-count="8"><div style="position:absolute;left:{{ z.x }}px;top:{{ z.y }}px;width:{{ z.w }}px;height:{{ z.h }}px;border:2px dashed {{ z.c }};border-radius:{{ z.r }};box-sizing:border-box;padding:8px 10px;color:{{ z.c }};font:bold 14px Consolas,Menlo,monospace;pointer-events:none;display:flex;align-items:{{ z.align }};justify-content:{{ z.justify }}">{{ z.label }}</div></sc-for></sc-if>
+<div style="position:absolute;left:1512px;top:300px;pointer-events:none" class="AfToastStack"><sc-for list="{{ toasts }}" as="t" hint-placeholder-count="2"><div class="{{ t.cls }}"><div class="AfToastBar"></div><div class="AfToastIcon">{{ t.icon }}</div><div class="AfToastBody"><div class="AfToastTitle">{{ t.title }}</div><div class="AfToastText">{{ t.text }}</div></div></div></sc-for></div>
+<div style="position:absolute;left:48px;top:340px;pointer-events:none">
+<div class="{{ f3.cls }}">
+<div class="AfSpecHead"><span class="AfSpecEyebrow">Spectating</span><span class="AfSpecCount">{{ f3.count }}</span></div>
+<span class="AfSpecName">{{ f3.name }}</span><span class="AfSpecMeta">{{ f3.meta }}</span>
+<sc-for list="{{ f3.mods }}" as="m" hint-placeholder-count="2"><div class="{{ m.cls }}"><div class="AfModIconBox AfToneBox"><img class="AfCrIcon" src="{{ m.src }}"></div><div class="AfSpecModText"><span class="AfSpecModName">{{ m.name }}</span><span class="AfSpecModDesc">{{ m.desc }}</span></div></div></sc-for>
+</div>
+</div>
+</div>
+</div>
+
+</div>
+</section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+const IC = (c, g) => 'icons/csroll/' + c + (g ? '-gold' : '') + '.svg';
+const CATN = { weapon: 'Weapon', movement: 'Movement', health: 'Health', grenade: 'Grenade', vision: 'Vision', chaos: 'Chaos' };
+const CAT_EX = {
+  weapon: 'Weapon Roulette, Infinite Ammo, Master Zeus, Flashing Bullets',
+  movement: 'Jetpack, Drunk, BunnyHop, Speedhack',
+  health: 'Vampire, Regeneration, Juggernaut, Revive',
+  grenade: 'Cluster Grenades, Poisonous Smoke, Suicide Bomber',
+  vision: 'Vanish, Invisibility, X-Ray, Smoke Immunity',
+  chaos: 'Butterfly Effect, Mimic, Swap On Death, Teleport'
+};
+const M = {
+  jetpack: ['Jetpack', 'movement', 'Ability', 'Hold Space in the air to fly. Fuel refills on the ground.'],
+  vanish: ['Vanish', 'vision', 'Ability', 'Press F to turn fully invisible for 4 seconds.'],
+  vampire: ['Vampire', 'health', 'Buff', 'Every hit heals you for 30% of the damage you deal.'],
+  drunk: ['Drunk', 'movement', 'Nerf', 'Your view sways and your movement drifts off course.'],
+  roulette: ['Weapon Roulette', 'weapon', 'Chaos', 'Your weapon swaps to a random one every 15 seconds.'],
+  regen: ['Regeneration', 'health', 'Buff', 'Regain 12 HP per second. Standing still doubles it.'],
+  hardhead: ['Hard Head', 'health', 'Buff', 'Headshots against you only deal body damage.'],
+  mimic: ['Mimic', 'chaos', 'Chaos', 'Kill a player to steal their modifier for this round.'],
+  invis: ['Invisibility', 'vision', 'Buff', 'You fade out while standing still. Moving reveals you.'],
+  recall: ['Recall', 'chaos', 'Ability', 'Inspect to return to where you stood 5 seconds ago.'],
+  butterfly: ['Butterfly Effect', 'chaos', 'Chaos', 'Your modifier rerolls every 20 seconds.'],
+  cluster: ['Cluster Grenades', 'grenade', 'Buff', 'Your HE grenades split into 4 smaller blasts.'],
+  flashing: ['Flashing Bullets', 'weapon', 'Nerf', 'Every shot you fire flashes you for a moment.']
+};
+const m = k => { const [name, cat, tone, desc] = M[k]; return { name, cat, tone, desc }; };
+const SCR = 'ABCDEFGHJKLMNPQRSTUVWXYZ0123456789#%&*$@';
+const scramble = (s, n) => {
+  let r = '';
+  for (let i = n; i < s.length; i++) r += s[i] === ' ' ? ' ' : SCR[(i * 7 + s.charCodeAt(i) * 3) % SCR.length];
+  return [{ t: s.slice(0, n), cls: '' }, { t: r, cls: 'AfScr' }];
+};
+const card = (k, o = {}) => {
+  const x = m(k);
+  return {
+    cls: 'AfCrHud Visible AfCrPanel AfRollCard ' + x.tone + (o.late ? ' Late Punch' : ''),
+    icon: IC(x.cat), cat: CATN[x.cat], tag: x.tone, name: x.name,
+    desc: o.decode != null ? scramble(x.desc, o.decode) : [{ t: x.desc, cls: '' }]
+  };
+};
+const deck = (eyebrow, keys, o = {}, late) => ({ eyebrow, eyebrowCls: 'AfRevealEyebrow' + (late ? ' Late' : ''), cards: keys.map(k => card(k, o[k] || (late ? { late: true } : {}))) });
+const slot = (rows, mode, pct, cap) => ({
+  cap, winCls: 'AfRollWindow' + (mode === 'moving' ? ' Moving' : ' Landing'),
+  reelCls: 'AfRollReel' + (mode === 'moving' ? ' Offset' : ''),
+  rows: rows.map((t, i) => ({ t, cls: 'AfRollRow' + (mode !== 'moving' && i === 1 ? ' Cur' : '') })),
+  fill: 'AfCrFill Gold P' + pct
+});
+const SLOTS = [
+  slot(['X-Ray', 'Speedhack', 'Mimic', 'Drunk'], 'moving', 2, 'A1 · 0.2 s · fast cycle (reel mid-scroll)'),
+  slot(['Recall', 'Hard Head', 'Jetpack', 'Vampire'], 'moving', 5, 'A2 · 0.9 s · still cycling'),
+  slot(['Hard Head', 'Vampire', 'Drunk'], 'landing', 9, 'A3 · 1.8 s · landing, winner in gold')
+];
+
+const W = o => ({
+  hasKey: !!o.key, plain: true, spin: false, stolen: false, side: '', ...o,
+  hasBar: !!o.fill, fill: o.fill ? 'AfCrFill ' + o.fill : '',
+  cls: 'AfCrHud FromLeft Visible AfCrPanel AfModW' + (o.st ? ' ' + o.st : '') + (o.tone ? ' ' + o.tone : '')
+});
+const ability = (label, key, st) => ({
+  ready: W({ label, key, value: 'READY', side: 'Press ' + key, fill: 'Gold P10', st: 'Ready' }),
+  active: W({ label, key, value: 'ACTIVE', side: '2.4s left', fill: 'Green P6', st: 'Active' }),
+  cooldown: W({ label, key, value: '12.4s', side: 'Cooldown', fill: 'Red P3', st: 'Cooldown' })
+})[st];
+const fuel = st => ({
+  full: W({ label: 'Jetpack · fuel', key: 'Space', value: '100%', side: 'Hold to fly', fill: 'Gold P10' }),
+  mid: W({ label: 'Jetpack · fuel', key: 'Space', value: '48%', side: 'Hold to fly', fill: 'Orange P5', st: 'Warn' }),
+  empty: W({ label: 'Jetpack · fuel', key: 'Space', value: '8%', side: 'Refuels on ground', fill: 'Red P1', st: 'Bad' })
+})[st];
+const conceal = st => ({
+  full: W({ label: 'Invisibility · concealment', value: '100%', side: 'Hidden', fill: 'Gold P10' }),
+  mid: W({ label: 'Invisibility · concealment', value: '52%', side: 'Partly visible', fill: 'Orange P5', st: 'Warn' }),
+  empty: W({ label: 'Invisibility · concealment', value: '0%', side: 'Visible', fill: 'Red P0', st: 'Bad' })
+})[st];
+const regen = st => st === 'boosted'
+  ? W({ label: 'Regeneration', value: '24 HP/s', side: 'Standing still ×2', st: 'Boosted' })
+  : W({ label: 'Regeneration', value: '12 HP/s', side: 'Regenerating' });
+const rotor = (label, idle, spin, landed, next, st) => ({
+  idle: W({ label, value: idle, side: next, fill: 'Gold P5' }),
+  spinning: W({ label, plain: false, spin: true, g1: spin[0], value: spin[1], g2: spin[2], fill: 'Orange P10', st: 'Spinning' }),
+  landed: W({ label, value: landed, side: 'Landed', fill: 'Gold P10', st: 'Landed' })
+})[st];
+const roulette = st => rotor('Weapon Roulette', 'AK-47', ['M4A4', 'Negev', 'Deagle'], 'Negev', 'Next swap in 8s', st);
+const butterfly = st => rotor('Butterfly Effect', 'Drunk', ['Jetpack', 'Vanish', 'X-Ray'], 'Vanish', 'Reroll in 14s', st);
+const stolen = st => st === 'full'
+  ? W({ label: 'Mimic · stolen', plain: false, stolen: true, icon: IC('health'), value: 'Vampire', side: 'from nyx', tone: 'Buff' })
+  : W({ label: 'Mimic · stolen', value: '—', side: 'Kill to steal one', st: 'Empty' });
+
+const chip = keys => {
+  if (keys.length === 1) {
+    const x = m(keys[0]);
+    return { cls: 'AfCrHud FromLeft Visible AfCrPanel AfModChip ' + x.tone, icons: [{ cls: 'AfModIconBox AfToneBox', src: IC(x.cat) }], name: x.name, tag: x.tone, hasTag: true };
+  }
+  return { cls: 'AfCrHud FromLeft Visible AfCrPanel AfModChip Multi', icons: keys.map(k => ({ cls: 'AfModIconBox AfToneBox ' + m(k).tone, src: IC(m(k).cat) })), name: keys.length + ' modifiers', hasTag: false };
+};
+const bar = (keys, widgets) => ({ hasChip: !!keys, chip: keys ? chip(keys) : null, widgets });
+const only = w => bar(null, [w]);
+const BARS = {
+  Passive: bar(['hardhead'], []),
+  Jetpack: bar(['jetpack'], [fuel('mid')]),
+  'Vanish · ready': bar(['vanish'], [ability('Vanish', 'F', 'ready')]),
+  'Vanish · cooldown': bar(['vanish'], [ability('Vanish', 'F', 'cooldown')]),
+  Roulette: bar(['roulette'], [roulette('spinning')]),
+  Mimic: bar(['mimic'], [stolen('full')]),
+  '3 widgets': bar(['vanish', 'regen', 'roulette'], [ability('Vanish', 'F', 'ready'), regen('boosted'), roulette('idle')])
+};
+const specMods = ['jetpack', 'vampire', 'drunk'];
+const spec = n => ({
+  cls: 'AfCrHud FromLeft Visible AfCrPanel AfSpec', name: 'venoxy', meta: 'T · 64 HP · 3 kills this round', count: n + (n > 1 ? ' modifiers' : ' modifier'), cap: n + ' ' + (n > 1 ? 'entries' : 'entry'),
+  mods: specMods.slice(0, n).map(k => { const x = m(k); return { cls: 'AfSpecMod ' + x.tone, src: IC(x.cat), name: x.name, desc: x.desc }; })
+});
+const RED = 'rgba(255,90,92,0.85)', GOLD = 'rgba(255,214,10,0.75)';
+const Z = (x, y, w, h, label, c, extra = {}) => ({ x, y, w, h, label, c, r: '8px', align: 'flex-start', justify: 'flex-start', ...extra });
+const ZONES = [
+  Z(16, 16, 300, 300, 'CS2 RADAR', RED),
+  Z(660, 0, 600, 90, 'CS2 SCORE BAR', RED),
+  Z(1484, 16, 420, 260, 'CS2 KILLFEED', RED),
+  Z(16, 690, 520, 260, 'CS2 CHAT', RED, { align: 'flex-end' }),
+  Z(560, 990, 800, 80, 'CS2 HEALTH · AMMO · MONEY', RED),
+  Z(710, 290, 500, 500, '+', RED, { r: '50%', align: 'center', justify: 'center' }),
+  Z(510, 96, 900, 204, 'ARCFRAG TOP CENTER · Welcome / Summary / Alert / Roll reveal', GOLD, { align: 'flex-end' }),
+  Z(1512, 300, 360, 280, 'ARCFRAG TOASTS', GOLD, { align: 'flex-end' })
+];
+const ZONES3 = [...ZONES, Z(660, 900, 600, 80, 'CS2 SPECTATOR TARGET BAR', RED)];
+const TOASTS = [
+  { cls: 'AfHud FromRight Visible AfPanel AfToast Gold', icon: '★', title: 'New personal best', text: '12-kill streak' },
+  { cls: 'AfHud FromRight Visible AfPanel AfToast Info', icon: 'i', title: 'Retakes is filling up', text: '8/9 · say !servers' }
+];
+const F1 = {
+  'A1': { rolling: true, slot: SLOTS[0] },
+  'A2': { rolling: true, slot: SLOTS[1] },
+  'A3': { rolling: true, slot: SLOTS[2] },
+  'B · 1': { reveal: true, deck: deck('Your modifier', ['vampire']), bar: bar(['vampire'], []) },
+  'B · 2': { reveal: true, deck: deck('Your modifiers · 2', ['jetpack', 'drunk']), bar: bar(['jetpack', 'drunk'], [fuel('full')]) },
+  'B · 3': { reveal: true, deck: deck('Your modifiers · 3', ['vanish', 'regen', 'roulette']), bar: BARS['3 widgets'] },
+  'Decoding': { reveal: true, deck: deck('Your modifiers · 3', ['vanish', 'regen', 'roulette'], { vanish: { decode: 30 }, regen: { decode: 14 }, roulette: { decode: 4 } }) },
+  'C · late': { reveal: true, deck: deck('New modifier · joined mid-round', ['recall'], {}, true), bar: bar(['recall'], [ability('Recall', 'Inspect', 'ready')]) }
+};
+const LIVE = 'Live ▶';
+const SEQ = ['Drunk','X-Ray','Jetpack','Mimic','Speedhack','Vampire','Recall','Hard Head','Teleport','BunnyHop','Juggernaut','Drunk','Mimic','X-Ray','Jetpack','Vampire','Speedhack','Recall','Hard Head','Teleport','Juggernaut','Mimic','Drunk','Vampire','Vanish','Jetpack','Recall','X-Ray'];
+const N_T = 24;
+const vis = (cls, on, leaving) => cls.replace(' Visible', '') + (on ? ' Visible' + (leaving ? ' Leaving' : '') : '');
+const visBar = (b, t0, t, out) => ({
+  ...b,
+  chip: b.chip && { ...b.chip, cls: vis(b.chip.cls, t >= t0, out) },
+  widgets: b.widgets.map((w, i) => ({ ...w, cls: vis(w.cls, t >= t0 + 120 * (i + 1), out) }))
+});
+const live1 = t => {
+  const o = { rolling: false, reveal: false, slot: SLOTS[0], deck: { cards: [] }, bar: null, slotCls: 'AfCrHud Visible AfCrPanel AfRollSlot' };
+  if (t < 2000) {
+    const k = Math.min(1, t / 1800), p = N_T * (1 - Math.pow(1 - k, 3)), i = Math.min(N_T, Math.floor(p));
+    const moving = t < 1550;
+    const rows = moving ? [SEQ[Math.max(0, i - 1)], SEQ[i], SEQ[i + 1], SEQ[i + 2]] : [SEQ[N_T - 1], SEQ[N_T], SEQ[N_T + 1]];
+    o.rolling = true;
+    o.slot = { winCls: 'AfRollWindow' + (moving ? ' Moving' : ' Landing'), reelCls: 'AfRollReel' + (moving ? ' Offset Spin' : ''),
+      rows: rows.map((r, j) => ({ t: r, cls: 'AfRollRow' + (!moving && j === 1 ? ' Cur' : '') })), fill: 'AfCrFill Gold P' + Math.round(k * 10) };
+    o.slotCls = vis('AfCrHud AfCrPanel AfRollSlot', t > 60, t > 1850);
+  } else {
+    const x = m('vanish'), n = Math.max(0, Math.floor((t - 2250) / 28)), out = t > 7000;
+    o.reveal = true;
+    o.deck = { eyebrow: 'Your modifier', eyebrowCls: vis('AfCrHud AfRevealEyebrow', true, out), cards: [{
+      cls: vis('AfCrHud AfCrPanel AfRollCard ' + x.tone + ' Punch', t >= 2080, out), icon: IC(x.cat), cat: CATN[x.cat], tag: x.tone, name: x.name,
+      desc: n >= x.desc.length ? [{ t: x.desc, cls: '' }] : scramble(x.desc, n) }] };
+  }
+  if (t >= 5100) o.bar = visBar(bar(['vanish'], [ability('Vanish', 'F', 'ready')]), 5200, t, t > 9200);
+  return o;
+};
+const WP = ['M4A4', 'Negev', 'Deagle', 'AWP', 'P90', 'Nova', 'MAG-7', 'SSG 08'];
+const live2 = t => {
+  let v;
+  if (t < 1500) v = W({ label: 'Vanish', key: 'F', value: 'READY', side: 'Press F', fill: 'Gold P10', st: 'Ready' });
+  else if (t < 5500) { const r = (5500 - t) / 1000; v = W({ label: 'Vanish', key: 'F', value: 'ACTIVE', side: r.toFixed(1) + 's left', fill: 'Green P' + Math.ceil(r / 4 * 10), st: 'Active' }); }
+  else { const r = (12000 - t) / 1000; v = W({ label: 'Vanish', key: 'F', value: r.toFixed(1) + 's', side: 'Cooldown', fill: 'Red P' + Math.floor((1 - r / 6.5) * 10), st: 'Cooldown' }); }
+  const ft = t % 6000, f = ft < 3000 ? 100 - ft / 3000 * 92 : 8 + (ft - 3000) / 3000 * 92;
+  const fw = W({ label: 'Jetpack · fuel', key: 'Space', value: Math.round(f) + '%', side: ft < 3000 ? 'Flying' : 'Refueling',
+    fill: (f > 60 ? 'Gold' : f > 25 ? 'Orange' : 'Red') + ' P' + Math.round(f / 10), st: f > 60 ? '' : f > 25 ? 'Warn' : 'Bad' });
+  let rw;
+  if (t < 8000) rw = W({ label: 'Weapon Roulette', value: 'AK-47', side: 'Next swap in ' + Math.ceil((8000 - t) / 1000) + 's', fill: 'Gold P' + Math.round((8000 - t) / 800) });
+  else if (t < 9200) { const i = Math.floor((t - 8000) / 90); rw = W({ label: 'Weapon Roulette', plain: false, spin: true, g1: WP[(i + 7) % 8], value: WP[i % 8], g2: WP[(i + 1) % 8], fill: 'Orange P10', st: 'Spinning' }); }
+  else rw = W({ label: 'Weapon Roulette', value: 'Negev', side: 'Landed', fill: 'Gold P10', st: 'Landed' });
+  return bar(['vanish', 'jetpack', 'roulette'], [v, fw, rw]);
+};
+const SPEC_P = [['venoxy', 'T · 64 HP · 3 kills this round', 3], ['nyx', 'CT · 100 HP · 1 kill this round', 1], ['k1ller.exe', 'T · 22 HP · 2 kills this round', 2]];
+const live3 = t => {
+  const i = Math.floor(t / 3000) % 3, l = t % 3000, [name, meta, n] = SPEC_P[i];
+  return { ...spec(n), name, meta, cls: vis('AfCrHud FromLeft AfCrPanel AfSpec', l > 80, l > 2750) };
+};
+const F3 = { '1 modifier': spec(1), '2 modifiers': spec(2), '3 modifiers': spec(3) };
+
+class Component extends DCLogic {
+  state = { f1: LIVE, f2: LIVE, f3: LIVE, zones: true, scale: 0.5, t: 0 };
+  t0 = performance.now();
+  framesRef = React.createRef();
+  componentDidMount() {
+    const measure = () => { const el = this.framesRef.current; if (el && el.clientWidth) this.setState({ scale: el.clientWidth / 1920 }); };
+    this.ro = new ResizeObserver(measure);
+    if (this.framesRef.current) this.ro.observe(this.framesRef.current);
+    measure();
+    this.iv = setInterval(() => {
+      const { f1, f2, f3 } = this.state;
+      if (f1 === LIVE || f2 === LIVE || f3 === LIVE) this.setState({ t: performance.now() - this.t0 });
+    }, 80);
+  }
+  componentWillUnmount() { this.ro && this.ro.disconnect(); clearInterval(this.iv); }
+  tabs(key, list) { return list.map(l => ({ label: l, cls: 'AfSegment' + (this.state[key] === l ? ' Selected' : ''), onClick: () => { if (l === LIVE) this.t0 = performance.now(); this.setState({ [key]: l, t: 0 }); } })); }
+  renderVals() {
+    const { zones, scale, t } = this.state;
+    const L = x => this.state[x] === LIVE;
+    const f1 = { rolling: false, reveal: false, slot: SLOTS[0], deck: { cards: [] }, slotCls: 'AfCrHud Visible AfCrPanel AfRollSlot', ...(L('f1') ? live1(t % 9500) : F1[this.state.f1]) };
+    f1.hasBar = !!f1.bar;
+    return {
+      cats: Object.keys(CATN).map(c => ({ name: CATN[c] === 'Vision' ? 'Vision / Stealth' : CATN[c], white: IC(c), gold: IC(c, true), file: c + '.svg · ' + c + '-gold.svg', examples: CAT_EX[c] })),
+      slots: SLOTS,
+      reveals: [
+        { ...deck('Tones', ['vampire', 'drunk', 'roulette', 'vanish']), cap: 'Tone colors: Buff · Nerf · Chaos · Ability' },
+        { ...deck('Your modifier', ['vampire']), cap: 'B · 1 card (default)' },
+        { ...deck('Your modifiers · 2', ['jetpack', 'drunk']), cap: 'B · 2 cards' },
+        { ...deck('Your modifiers · 3', ['vanish', 'regen', 'roulette']), cap: 'B · 3 cards' },
+        { ...deck('Your modifiers · 3', ['vanish', 'regen', 'roulette'], { vanish: { decode: 30 }, regen: { decode: 14 }, roulette: { decode: 4 } }), cap: 'B · description decoding letter by letter (scrambled = dim)' },
+        { ...deck('New modifier · joined mid-round', ['recall'], {}, true), cap: 'C · late modifier (gold glow + punch)' }
+      ],
+      chips: [
+        { bar: bar(['vampire'], []), cap: 'Buff' }, { bar: bar(['drunk'], []), cap: 'Nerf' },
+        { bar: bar(['butterfly'], []), cap: 'Chaos' }, { bar: bar(['jetpack'], []), cap: 'Ability' },
+        { bar: bar(['vanish', 'regen', 'roulette'], []), cap: 'Multi · 2–3 modifiers' }
+      ],
+      widgetRows: [
+        { title: 'ABILITY WITH COOLDOWN · Vanish (F) · Recall (Inspect)', cells: [
+          { bar: only(ability('Vanish', 'F', 'ready')), cap: 'READY · gold, glowing' },
+          { bar: only(ability('Vanish', 'F', 'active')), cap: 'ACTIVE · green, time left' },
+          { bar: only(ability('Vanish', 'F', 'cooldown')), cap: 'COOLDOWN · red, recharging' },
+          { bar: only(ability('Recall', 'Inspect', 'ready')), cap: 'Recall · Inspect key' }] },
+        { title: 'GAUGE · Jetpack fuel · Invisibility concealment', cells: [
+          { bar: only(fuel('full')), cap: 'Full' }, { bar: only(fuel('mid')), cap: 'Mid · orange' }, { bar: only(fuel('empty')), cap: 'Empty · red' },
+          { bar: only(conceal('full')), cap: 'Concealment full' }, { bar: only(conceal('mid')), cap: 'Concealment mid' }, { bar: only(conceal('empty')), cap: 'Concealment empty' }] },
+        { title: 'VALUE · Regeneration', cells: [
+          { bar: only(regen('normal')), cap: 'Normal' }, { bar: only(regen('boosted')), cap: 'Standing still · boosted (gold)' }] },
+        { title: 'ROTATING TIMER · Weapon Roulette · Butterfly Effect', cells: [
+          { bar: only(roulette('idle')), cap: 'IDLE · countdown' }, { bar: only(roulette('spinning')), cap: 'SPINNING · names cycle' }, { bar: only(roulette('landed')), cap: 'LANDED' },
+          { bar: only(butterfly('idle')), cap: 'Butterfly · IDLE' }, { bar: only(butterfly('spinning')), cap: 'Butterfly · SPINNING' }, { bar: only(butterfly('landed')), cap: 'Butterfly · LANDED' }] },
+        { title: 'STOLEN · Mimic', cells: [
+          { bar: only(stolen('full')), cap: 'Stolen: Vampire' }, { bar: only(stolen('empty')), cap: 'Empty' }] }
+      ],
+      barVariants: [
+        { bar: BARS.Passive, cap: 'Passive modifier · no widget (Hard Head)' },
+        { bar: BARS.Jetpack, cap: '1 widget · Jetpack' },
+        { bar: BARS['3 widgets'], cap: '3 widgets stacked (max height 332px)' }
+      ],
+      specs: [spec(1), spec(2), spec(3)],
+      toggleZones: () => this.setState({ zones: !zones }),
+      zonesCls: 'AfToggle' + (zones ? ' On' : ''),
+      zones, zoneList: ZONES, zoneList3: ZONES3, toasts: TOASTS,
+      framesRef: this.framesRef, frameH: Math.round(1080 * scale) + 'px', frameTf: 'scale(' + scale + ')',
+      f1Tabs: this.tabs('f1', [LIVE, ...Object.keys(F1)]), f1,
+      f2Tabs: this.tabs('f2', [LIVE, ...Object.keys(BARS)]), f2bar: L('f2') ? live2(t % 12000) : BARS[this.state.f2],
+      f3Tabs: this.tabs('f3', [LIVE, ...Object.keys(F3)]), f3: L('f3') ? live3(t % 9000) : F3[this.state.f3]
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,549 @@
+/* =====================================================================
+   ARCFRAG · CSROLL HUD · component sheet v1.0
+   Target: CS2 Panorama. Class selectors, descendant combos, :hover not used
+   (HUD is not clickable). No grid, no flex gap, no position:absolute in the
+   components, no filters/blur. Values written out, no var().
+   Requires nothing else; existing toasts come from arcfrag-ui.css.
+   ---------------------------------------------------------------------
+   TOKENS
+   | panel          | rgba(17,20,24,0.94) · 1px rgba(255,255,255,0.08) · r12
+   |                | shadow 0 12px 32px rgba(0,0,0,0.45)
+   | surface-2      | #1a1e24            | track  rgba(255,255,255,0.08)
+   | gold           | #ffd60a            | tint   rgba(255,214,10,0.10 / 0.14)
+   | text           | #ffffff · muted #9aa3ad · dim #5b636c · body #c4cad1
+   | tone Buff      | #3ddc84            | tone Nerf    #ff4d4f
+   | tone Chaos     | #ff8a00            | tone Ability #ffd60a
+   | font           | Stratum2 (stand-in: Barlow Semi Condensed)
+   | eyebrow        | 11–13px bold uppercase, letter-spacing 2–3px
+   | bars           | 6px (r3) · fill width in 10% steps: .AfCrFill.P0 … .P10
+   | motion         | in 0.3s fade + 12px slide · punch scale 1.3→1 0.3s
+   |                | bars: width + background-color only, 0.1s linear
+   ---------------------------------------------------------------------
+   POSITIONS (1920×1080)
+   | Roll slot / reveal | top center · top 100 · centered · max height 200 (≤ y 300)
+   | Modifier bar       | left 48 · top 340 · width 320 · max height 332 (≤ y 672)
+   | Spectator panel    | left 48 · top 340 · width 380 · replaces the bar while dead
+   | Toasts (existing)  | right 48 · top 300 · 360 wide · 4 lanes
+   ---------------------------------------------------------------------
+   TIMELINES (driven by JS: $.Schedule / class toggles, 10 Hz)
+   | Roll      | 0–1.8s slot: name swaps ease out (fast → slow), reel .Spin while
+   |           | .Moving, progress P0→P10 · 1.55s .Landing (winner gold)
+   |           | 1.85s slot .Leaving · 2.0s cards .Visible (punch), +150ms stagger
+   |           | desc decodes ~35 chars/s (decoded = white, rest .AfScr)
+   |           | 5.2s modifier bar in (chip, widgets +120ms each) · 7.0s cards .Leaving
+   | Ability   | READY (glow loop) → ACTIVE (fill drains, green) → COOLDOWN (red,
+   |           | fill recharges, "x.xs") → READY
+   | Gauge     | fill + % per tick · gold >60 · .Warn orange >25 · .Bad red
+   | Rotor     | IDLE countdown → SPINNING (name swap every 90ms, 1.2s) → LANDED
+   | Spectator | target change: .Leaving 0.22s → new content → .Visible 0.3s
+   ---------------------------------------------------------------------
+   PANORAMA NOTES
+   font-size:0 + inline-block rows  → flow-children: right
+   display:block stacks             → flow-children: down
+   text-align:center/right          → horizontal-align: center/right
+   line-height on labels            → vertical-align: center
+   <img class="AfCrIcon">           → <Image class="AfCrIcon" src="file://{images}/csroll/health.svg" />
+   overflow:hidden                  → overflow: clip
+   Dynamic classes: tone (Buff/Nerf/Chaos/Ability), state (Ready/Active/
+   Cooldown/Warn/Bad/Boosted/Spinning/Landed/Empty), fill (P0–P10 + color),
+   .Visible / .Visible.Leaving for in/out.
+   ===================================================================== */
+
+
+/* ---------- Base ------------------------------------------------------ */
+
+.AfCrPanel {
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 12px;
+  background-color: rgba(17,20,24,0.94);
+  box-shadow: 0px 12px 32px 0px rgba(0,0,0,0.45);
+}
+.AfCrHud {
+  opacity: 0;
+  transform: translateY(12px);
+  transition-property: opacity, transform;
+  transition-duration: 0.3s;
+  transition-timing-function: ease-out;
+}
+.AfCrHud.FromLeft { transform: translateX(-12px); }
+.AfCrHud.Visible { opacity: 1; transform: translateX(0px) translateY(0px); }
+.AfCrHud.Visible.Leaving { opacity: 0; transform: translateY(-12px); transition-duration: 0.22s; transition-timing-function: ease-in; }
+.AfCrHud.FromLeft.Visible.Leaving { transform: translateX(-12px); }
+.AfCrHud.Punch.Visible { animation-name: AfCrPunch; animation-duration: 0.3s; animation-timing-function: ease-out; }
+
+@keyframes AfCrPunch { 0% { opacity: 0; transform: scale(1.3); } 100% { opacity: 1; transform: scale(1); } }
+@keyframes AfCrSpin { 0% { transform: translateY(-40px); } 100% { transform: translateY(0px); } }
+.AfRollReel.Spin { animation-name: AfCrSpin; animation-duration: 0.12s; animation-iteration-count: infinite; animation-timing-function: linear; }
+@keyframes AfCrGlow {
+  0% { box-shadow: 0px 0px 0px 1px rgba(255,214,10,0.35), 0px 0px 10px 0px rgba(255,214,10,0.12), 0px 12px 32px 0px rgba(0,0,0,0.45); }
+  100% { box-shadow: 0px 0px 0px 1px rgba(255,214,10,0.60), 0px 0px 22px 0px rgba(255,214,10,0.32), 0px 12px 32px 0px rgba(0,0,0,0.45); }
+}
+
+.AfCrIcon { display: block; width: 24px; height: 24px; }
+.AfCrTag {
+  display: inline-block;
+  vertical-align: middle;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 4px;
+  background-color: rgba(255,255,255,0.06);
+  color: #9aa3ad;
+  font-family: "Stratum2", "Barlow Semi Condensed", "Arial Narrow", sans-serif;
+  font-size: 11px;
+  font-weight: bold;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  line-height: 20px;
+}
+
+/* Tones */
+.AfToneBar { height: 3px; background-color: #5b636c; }
+.AfToneBox { border: 1px solid rgba(255,255,255,0.12); background-color: rgba(255,255,255,0.06); }
+.Buff .AfToneBar, .AfToneBar.Buff { background-color: #3ddc84; }
+.Buff .AfToneBox, .AfToneBox.Buff { background-color: rgba(61,220,132,0.16); border-color: rgba(61,220,132,0.45); }
+.Buff .AfToneText { color: #3ddc84; }
+.Buff .AfCrTag { background-color: rgba(61,220,132,0.14); color: #3ddc84; }
+.AfRollCard.Buff { border-color: rgba(61,220,132,0.40); }
+.Nerf .AfToneBar, .AfToneBar.Nerf { background-color: #ff4d4f; }
+.Nerf .AfToneBox, .AfToneBox.Nerf { background-color: rgba(255,77,79,0.16); border-color: rgba(255,77,79,0.45); }
+.Nerf .AfToneText { color: #ff4d4f; }
+.Nerf .AfCrTag { background-color: rgba(255,77,79,0.14); color: #ff4d4f; }
+.AfRollCard.Nerf { border-color: rgba(255,77,79,0.40); }
+.Chaos .AfToneBar, .AfToneBar.Chaos { background-color: #ff8a00; }
+.Chaos .AfToneBox, .AfToneBox.Chaos { background-color: rgba(255,138,0,0.16); border-color: rgba(255,138,0,0.45); }
+.Chaos .AfToneText { color: #ff8a00; }
+.Chaos .AfCrTag { background-color: rgba(255,138,0,0.14); color: #ff8a00; }
+.AfRollCard.Chaos { border-color: rgba(255,138,0,0.40); }
+.Ability .AfToneBar, .AfToneBar.Ability { background-color: #ffd60a; }
+.Ability .AfToneBox, .AfToneBox.Ability { background-color: rgba(255,214,10,0.16); border-color: rgba(255,214,10,0.45); }
+.Ability .AfToneText { color: #ffd60a; }
+.Ability .AfCrTag { background-color: rgba(255,214,10,0.14); color: #ffd60a; }
+.AfRollCard.Ability { border-color: rgba(255,214,10,0.40); }
+
+/* Bars */
+.AfCrBar { height: 6px; border-radius: 3px; background-color: rgba(255,255,255,0.08); overflow: hidden; }
+.AfCrFill {
+  height: 6px;
+  border-radius: 3px;
+  background-color: #ffd60a;
+  transition-property: width, background-color;
+  transition-duration: 0.1s;
+  transition-timing-function: linear;
+}
+.AfCrFill.Gold { background-color: #ffd60a; }
+.AfCrFill.Green { background-color: #3ddc84; }
+.AfCrFill.Red { background-color: #ff4d4f; }
+.AfCrFill.Orange { background-color: #ff8a00; }
+.AfCrFill.Muted { background-color: #5b636c; }
+.AfCrFill.P0 { width: 0%; }
+.AfCrFill.P1 { width: 10%; }
+.AfCrFill.P2 { width: 20%; }
+.AfCrFill.P3 { width: 30%; }
+.AfCrFill.P4 { width: 40%; }
+.AfCrFill.P5 { width: 50%; }
+.AfCrFill.P6 { width: 60%; }
+.AfCrFill.P7 { width: 70%; }
+.AfCrFill.P8 { width: 80%; }
+.AfCrFill.P9 { width: 90%; }
+.AfCrFill.P10 { width: 100%; }
+
+
+/* ---------- 1 · Roll slot (state A) --------------------------------- */
+
+.AfRollSlot {
+  display: inline-block;
+  box-sizing: border-box;
+  width: 520px;
+  padding: 14px 16px 14px 16px;
+  text-align: left;
+  font-size: 0;
+}
+.AfRollHead { height: 20px; margin: 0 0 10px 0; }
+.AfRollHeadL {
+  display: inline-block;
+  vertical-align: middle;
+  width: 50%;
+  color: #ffd60a;
+  font-family: "Stratum2", "Barlow Semi Condensed", "Arial Narrow", sans-serif;
+  font-size: 13px;
+  font-weight: bold;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  line-height: 20px;
+}
+.AfRollHeadR {
+  display: inline-block;
+  vertical-align: middle;
+  width: 50%;
+  text-align: right;
+  color: #9aa3ad;
+  font-family: "Stratum2", "Barlow Semi Condensed", "Arial Narrow", sans-serif;
+  font-size: 12px;
+  font-weight: bold;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  line-height: 20px;
+}
+.AfRollWindow {
+  height: 122px;
+  margin: 0 0 10px 0;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 8px;
+  background-color: #1a1e24;
+  overflow: hidden;
+}
+.AfRollReel { transform: translateY(0px); }
+.AfRollReel.Offset { transform: translateY(-20px); }
+.AfRollRow {
+  box-sizing: border-box;
+  height: 40px;
+  color: #5b636c;
+  font-family: "Stratum2", "Barlow Semi Condensed", "Arial Narrow", sans-serif;
+  font-size: 22px;
+  font-weight: bold;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  text-align: center;
+  line-height: 40px;
+}
+.AfRollRow.Cur {
+  border-top: 1px solid rgba(255,214,10,0.35);
+  border-bottom: 1px solid rgba(255,214,10,0.35);
+  background-color: rgba(255,214,10,0.10);
+  color: #ffffff;
+  font-size: 28px;
+  line-height: 38px;
+}
+.AfRollWindow.Moving .AfRollRow { color: #9aa3ad; letter-spacing: 6px; opacity: 0.75; }
+.AfRollWindow.Landing .AfRollRow.Cur { color: #ffd60a; }
+
+
+/* ---------- 1 · Reveal cards (states B + C) -------------------------- */
+
+.AfReveal { text-align: center; font-size: 0; }
+.AfRevealEyebrow {
+  display: block;
+  margin: 0 0 10px 0;
+  color: #ffffff;
+  font-family: "Stratum2", "Barlow Semi Condensed", "Arial Narrow", sans-serif;
+  font-size: 13px;
+  font-weight: bold;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  text-align: center;
+  line-height: 16px;
+}
+.AfRevealEyebrow.Late { color: #ffd60a; }
+.AfRollCard {
+  display: inline-block;
+  vertical-align: top;
+  box-sizing: border-box;
+  width: 300px;
+  margin: 0 6px;
+  text-align: left;
+  overflow: hidden;
+}
+.AfRollCard.Late {
+  border-color: rgba(255,214,10,0.60);
+  box-shadow: 0px 0px 0px 1px rgba(255,214,10,0.45), 0px 0px 28px 0px rgba(255,214,10,0.22), 0px 12px 32px 0px rgba(0,0,0,0.45);
+}
+.AfRollCardBody { padding: 14px 16px 16px 16px; }
+.AfRollCardHead { height: 40px; font-size: 0; }
+.AfRollIconBox {
+  display: inline-block;
+  vertical-align: middle;
+  box-sizing: border-box;
+  width: 40px;
+  height: 40px;
+  margin: 0 10px 0 0;
+  padding: 7px;
+  border-radius: 8px;
+}
+.AfRollCat {
+  display: inline-block;
+  vertical-align: middle;
+  width: 116px;
+  color: #9aa3ad;
+  font-family: "Stratum2", "Barlow Semi Condensed", "Arial Narrow", sans-serif;
+  font-size: 12px;
+  font-weight: bold;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  line-height: 16px;
+}
+.AfRollTagWrap { display: inline-block; vertical-align: middle; width: 100px; text-align: right; }
+.AfRollName {
+  display: block;
+  margin: 12px 0 0 0;
+  color: #ffffff;
+  font-family: "Stratum2", "Barlow Semi Condensed", "Arial Narrow", sans-serif;
+  font-size: 24px;
+  font-weight: bold;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  line-height: 28px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.AfRollDesc {
+  display: block;
+  height: 40px;
+  margin: 6px 0 0 0;
+  color: #c4cad1;
+  font-family: "Stratum2", "Barlow Semi Condensed", "Arial Narrow", sans-serif;
+  font-size: 15px;
+  line-height: 20px;
+  overflow: hidden;
+}
+.AfScr { color: #5b636c; letter-spacing: 1px; }
+
+
+/* ---------- 2 · Modifier bar ----------------------------------------- */
+
+.AfModBar { width: 320px; }
+.AfModChip {
+  box-sizing: border-box;
+  width: 320px;
+  height: 56px;
+  padding: 9px 12px 0 8px;
+  font-size: 0;
+  overflow: hidden;
+}
+.AfModChipBar { display: inline-block; vertical-align: middle; width: 3px; height: 36px; margin: 0 8px 0 0; border-radius: 2px; }
+.AfModChip.Multi .AfModChipBar { background-color: #ffd60a; }
+.AfModIconBox {
+  display: inline-block;
+  vertical-align: middle;
+  box-sizing: border-box;
+  width: 36px;
+  height: 36px;
+  margin: 0 10px 0 0;
+  padding: 5px;
+  border-radius: 8px;
+}
+.AfModChip.Multi .AfModIconBox { margin: 0 6px 0 0; }
+.AfModName {
+  display: inline-block;
+  vertical-align: middle;
+  width: 176px;
+  color: #ffffff;
+  font-family: "Stratum2", "Barlow Semi Condensed", "Arial Narrow", sans-serif;
+  font-size: 17px;
+  font-weight: bold;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  line-height: 20px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.AfModChip.Multi .AfModName { width: 150px; margin: 0 0 0 4px; }
+.AfModTagWrap { display: inline-block; vertical-align: middle; width: 64px; text-align: right; }
+
+/* Widget */
+.AfModW {
+  box-sizing: border-box;
+  width: 320px;
+  margin: 6px 0 0 0;
+  padding: 10px 12px 12px 12px;
+  border-radius: 10px;
+  font-size: 0;
+  transition-property: border-color, box-shadow;
+  transition-duration: 0.2s;
+  transition-timing-function: ease-out;
+}
+.AfModWHead { height: 18px; }
+.AfModWLabel {
+  display: inline-block;
+  vertical-align: middle;
+  width: 220px;
+  color: #9aa3ad;
+  font-family: "Stratum2", "Barlow Semi Condensed", "Arial Narrow", sans-serif;
+  font-size: 11px;
+  font-weight: bold;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  line-height: 18px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.AfModWKeyWrap { display: inline-block; vertical-align: middle; width: 74px; text-align: right; }
+.AfKeyHint {
+  display: inline-block;
+  height: 18px;
+  padding: 0 6px;
+  border: 1px solid rgba(255,255,255,0.22);
+  border-radius: 4px;
+  background-color: #1a1e24;
+  color: #ffffff;
+  font-family: "Stratum2", "Barlow Semi Condensed", "Arial Narrow", sans-serif;
+  font-size: 11px;
+  font-weight: bold;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  line-height: 16px;
+}
+.AfModWMain { height: 28px; margin: 4px 0 6px 0; white-space: nowrap; overflow: hidden; }
+.AfModWValue {
+  display: inline-block;
+  vertical-align: middle;
+  width: 170px;
+  color: #ffffff;
+  font-family: "Stratum2", "Barlow Semi Condensed", "Arial Narrow", sans-serif;
+  font-size: 22px;
+  font-weight: bold;
+  letter-spacing: 0.5px;
+  line-height: 28px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  transition-property: color;
+  transition-duration: 0.1s;
+}
+.AfModWSide {
+  display: inline-block;
+  vertical-align: middle;
+  width: 124px;
+  text-align: right;
+  color: #9aa3ad;
+  font-family: "Stratum2", "Barlow Semi Condensed", "Arial Narrow", sans-serif;
+  font-size: 13px;
+  line-height: 28px;
+  white-space: nowrap;
+}
+.AfModW.Ready { border-color: rgba(255,214,10,0.55); }
+.AfModW.Ready.Visible { animation-name: AfCrGlow; animation-duration: 1.1s; animation-iteration-count: infinite; animation-direction: alternate; }
+.AfModW.Ready .AfModWValue, .AfModW.Boosted .AfModWValue, .AfModW.Landed .AfModWValue { color: #ffd60a; }
+.AfModW.Active { border-color: rgba(61,220,132,0.50); }
+.AfModW.Active .AfModWValue { color: #3ddc84; }
+.AfModW.Cooldown .AfModWValue, .AfModW.Bad .AfModWValue { color: #ff4d4f; }
+.AfModW.Warn .AfModWValue, .AfModW.Spinning .AfModWValue { color: #ff8a00; }
+.AfModW.Boosted, .AfModW.Landed { border-color: rgba(255,214,10,0.45); }
+.AfModW.Spinning { border-color: rgba(255,138,0,0.40); }
+.AfModW.Empty .AfModWValue { color: #5b636c; }
+
+/* Rotating timer · spinning */
+.AfSpinGhost {
+  display: inline-block;
+  vertical-align: middle;
+  color: #5b636c;
+  font-family: "Stratum2", "Barlow Semi Condensed", "Arial Narrow", sans-serif;
+  font-size: 14px;
+  font-weight: bold;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  line-height: 28px;
+  opacity: 0.7;
+}
+.AfSpinCur {
+  display: inline-block;
+  vertical-align: middle;
+  margin: 0 12px;
+  color: #ff8a00;
+  font-family: "Stratum2", "Barlow Semi Condensed", "Arial Narrow", sans-serif;
+  font-size: 22px;
+  font-weight: bold;
+  letter-spacing: 4px;
+  text-transform: uppercase;
+  line-height: 28px;
+  opacity: 0.85;
+  transform: translateY(-4px);
+}
+
+/* Stolen */
+.AfStolenBox {
+  display: inline-block;
+  vertical-align: middle;
+  box-sizing: border-box;
+  width: 28px;
+  height: 28px;
+  margin: 0 10px 0 0;
+  padding: 3px;
+  border-radius: 6px;
+}
+.AfStolenIcon { display: block; width: 20px; height: 20px; }
+.AfModWValue.AfStolenName { width: 132px; }
+
+
+/* ---------- 3 · Spectator panel -------------------------------------- */
+
+.AfSpec { box-sizing: border-box; width: 380px; padding: 14px 16px 6px 16px; font-size: 0; }
+.AfSpecHead { height: 16px; }
+.AfSpecEyebrow {
+  display: inline-block;
+  vertical-align: middle;
+  width: 60%;
+  color: #ffd60a;
+  font-family: "Stratum2", "Barlow Semi Condensed", "Arial Narrow", sans-serif;
+  font-size: 12px;
+  font-weight: bold;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  line-height: 16px;
+}
+.AfSpecCount {
+  display: inline-block;
+  vertical-align: middle;
+  width: 40%;
+  text-align: right;
+  color: #9aa3ad;
+  font-family: "Stratum2", "Barlow Semi Condensed", "Arial Narrow", sans-serif;
+  font-size: 12px;
+  font-weight: bold;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  line-height: 16px;
+}
+.AfSpecName {
+  display: block;
+  width: 346px;
+  margin: 6px 0 0 0;
+  color: #ffffff;
+  font-family: "Stratum2", "Barlow Semi Condensed", "Arial Narrow", sans-serif;
+  font-size: 28px;
+  font-weight: bold;
+  letter-spacing: 0.5px;
+  line-height: 32px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.AfSpecMeta {
+  display: block;
+  margin: 2px 0 10px 0;
+  color: #9aa3ad;
+  font-family: "Stratum2", "Barlow Semi Condensed", "Arial Narrow", sans-serif;
+  font-size: 13px;
+  line-height: 18px;
+}
+.AfSpecMod {
+  box-sizing: border-box;
+  height: 56px;
+  padding: 9px 0 0 0;
+  border-top: 1px solid rgba(255,255,255,0.08);
+  font-size: 0;
+}
+.AfSpecMod .AfModIconBox { margin: 0 12px 0 0; }
+.AfSpecModText { display: inline-block; vertical-align: middle; width: 290px; }
+.AfSpecModName {
+  display: block;
+  color: #ffffff;
+  font-family: "Stratum2", "Barlow Semi Condensed", "Arial Narrow", sans-serif;
+  font-size: 15px;
+  font-weight: bold;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  line-height: 18px;
+}
+.AfSpecModDesc {
+  display: block;
+  color: #9aa3ad;
+  font-family: "Stratum2", "Barlow Semi Condensed", "Arial Narrow", sans-serif;
+  font-size: 13px;
+  line-height: 18px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}

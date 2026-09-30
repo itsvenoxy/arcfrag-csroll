@@ -59,7 +59,7 @@ public partial class CSRoll
         _commandGuids.Add(Core.Command.RegisterCommand("rollreload", Debounce("rollreload", OnRollReload), registerRaw: true, permission: AdminPermission, helpText: "Reload config.jsonc from disk without restarting the plugin or resetting active modifiers."));
         _commandGuids.Add(Core.Command.RegisterCommand("memodifier", Debounce("memodifier", OnMeModifier), registerRaw: true, permission: AdminPermission, helpText: "<modifier name> - Apply a modifier scoped to just yourself, without affecting anyone else."));
         _commandGuids.Add(Core.Command.RegisterCommand("rolltestall", Debounce("rolltestall", OnRollTestAll), registerRaw: true, permission: AdminPermission, helpText: "[seconds] - Applies every registered modifier to you one at a time, announcing each on and off, so broken ones can be spotted. Run again to stop."));
-        _commandGuids.Add(Core.Command.RegisterCommand("rollhelp", Debounce("rollhelp", OnRollHelp), registerRaw: true, helpText: "Prints every available CSRoll command."));
+        _commandGuids.Add(Core.Command.RegisterCommand("rollhelp", Debounce("rollhelp", OnRollHelp), registerRaw: true, helpText: "Prints every available Random Perk command."));
 
         InitializeMenu();
 

@@ -18,7 +18,7 @@ public static partial class CSRollUtils
     /// <summary>Single source of truth for the admin permission string - referenced by command registration (CSRoll.Commands.cs) and by the admin-only chat helpers below.</summary>
     public const string AdminPermission = "gamemodifiers.admin";
 
-    private static string _titlePrefix = "[CSRoll] ";
+    private static string _titlePrefix = "[Random Perk] ";
 
     /// <summary>
     /// Cross-modifier shared state: which player slots currently have x-ray vision (Wallhack).

@@ -58,7 +58,7 @@ public partial class CSRoll
 
     private void InitializeMenu()
     {
-        _commandGuids.Add(Core.Command.RegisterCommand("rollmenu", Debounce("rollmenu", OnRollMenu), registerRaw: true, permission: AdminPermission, helpText: "Opens the CSRoll configuration menu."));
+        _commandGuids.Add(Core.Command.RegisterCommand("rollmenu", Debounce("rollmenu", OnRollMenu), registerRaw: true, permission: AdminPermission, helpText: "Opens the Random Perk configuration menu."));
     }
 
     public void OnRollMenu(ICommandContext context)
@@ -90,7 +90,7 @@ public partial class CSRoll
 
     private IMenuAPI BuildRootMenu()
     {
-        var menu = CreateThemedMenu(new MenuConfiguration { Title = "CSRoll Configuration" });
+        var menu = CreateThemedMenu(new MenuConfiguration { Title = "Random Perk Configuration" });
 
         // Random rounds on/off. Reads the CURRENT state as the toggle's default so the menu always
         // opens reflecting reality rather than a stale value, and routes the change through

@@ -290,6 +290,14 @@
             replaces a shown one.
             </summary>
         </member>
+        <member name="M:Arcfrag.Core.Contract.IPlatformModeHud.SetSurfSummary(System.Int32,Arcfrag.Core.Contract.ModeHudSurfSummary)">
+            <summary>
+            Sets the surf numbers of one player for the map-end summary (best run of this map session, PB improvement); null
+            forgets them. Call it whenever they change (after every finished run) or at the latest at map end. ArcfragCore shows
+            the summary at the end of the map (win panel); a call after that redraws it. A player without numbers or without a
+            finished run gets "No run". Contract 0.10.0+.
+            </summary>
+        </member>
         <member name="T:Arcfrag.Core.Contract.ModeHudCategory">
             <summary>What a modifier is about, picks the icon.</summary>
         </member>
@@ -421,7 +429,7 @@
             <summary>The surf timer panel.</summary>
             <param name="Time">Run time, for example "01:23.456".</param>
             <param name="Speed">Horizontal speed without the unit, for example "1243" (the panel shows "u/s").</param>
-            <param name="Delta">Difference to the personal best with sign, for example "−0.482" or "+1.204"; null: no PB yet (shows "—").</param>
+            <param name="Delta">Difference to the personal best with sign, for example "−0.482" or "+1.204"; null: no running difference (shows <see cref="P:Arcfrag.Core.Contract.ModeHudSurfTimer.Pb"/>, or nothing without a PB).</param>
             <param name="Faster">The delta is ahead of the PB (green), else behind (red).</param>
             <param name="Stage">Current stage, 1-based.</param>
             <param name="Stages">Stages of the map; 1 or less is a linear map (no stage cell).</param>
@@ -432,7 +440,7 @@
             <summary>The surf timer panel.</summary>
             <param name="Time">Run time, for example "01:23.456".</param>
             <param name="Speed">Horizontal speed without the unit, for example "1243" (the panel shows "u/s").</param>
-            <param name="Delta">Difference to the personal best with sign, for example "−0.482" or "+1.204"; null: no PB yet (shows "—").</param>
+            <param name="Delta">Difference to the personal best with sign, for example "−0.482" or "+1.204"; null: no running difference (shows <see cref="P:Arcfrag.Core.Contract.ModeHudSurfTimer.Pb"/>, or nothing without a PB).</param>
             <param name="Faster">The delta is ahead of the PB (green), else behind (red).</param>
             <param name="Stage">Current stage, 1-based.</param>
             <param name="Stages">Stages of the map; 1 or less is a linear map (no stage cell).</param>
@@ -446,7 +454,7 @@
             <summary>Horizontal speed without the unit, for example "1243" (the panel shows "u/s").</summary>
         </member>
         <member name="P:Arcfrag.Core.Contract.ModeHudSurfTimer.Delta">
-            <summary>Difference to the personal best with sign, for example "−0.482" or "+1.204"; null: no PB yet (shows "—").</summary>
+            <summary>Difference to the personal best with sign, for example "−0.482" or "+1.204"; null: no running difference (shows <see cref="P:Arcfrag.Core.Contract.ModeHudSurfTimer.Pb"/>, or nothing without a PB).</summary>
         </member>
         <member name="P:Arcfrag.Core.Contract.ModeHudSurfTimer.Faster">
             <summary>The delta is ahead of the PB (green), else behind (red).</summary>
@@ -462,6 +470,13 @@
         </member>
         <member name="P:Arcfrag.Core.Contract.ModeHudSurfTimer.Done">
             <summary>Finished: time gold.</summary>
+        </member>
+        <member name="P:Arcfrag.Core.Contract.ModeHudSurfTimer.Pb">
+            <summary>
+            The personal best on this map, formatted like <see cref="P:Arcfrag.Core.Contract.ModeHudSurfTimer.Time"/> (for example "0:53.546"); null: no PB yet. Shown as
+            "PB 0:53.546" in the delta cell while there is no <see cref="P:Arcfrag.Core.Contract.ModeHudSurfTimer.Delta"/>. Contract 0.10.0+ (an init property, so plugins
+            built against 0.9.0 keep the same constructor).
+            </summary>
         </member>
         <member name="T:Arcfrag.Core.Contract.ModeHudSurfFinish">
             <summary>The surf finish card. The look follows the highest special finish: Record &gt; Top10 &gt; Pb &gt; "Run complete".</summary>
@@ -513,6 +528,32 @@
         </member>
         <member name="P:Arcfrag.Core.Contract.ModeHudSurfFinish.Record">
             <summary>New map record.</summary>
+        </member>
+        <member name="T:Arcfrag.Core.Contract.ModeHudSurfSummary">
+            <summary>The surf numbers of one player for the map-end summary (this map session only).</summary>
+            <param name="Best">Best finished run of the session, for example "0:52.342"; null: no finished run ("No run").</param>
+            <param name="PbDelta">How much the session beat the PB from before the session, with sign, for example "−1.204"; null: not beaten, or no PB before.</param>
+            <param name="NewPb">The session set a new personal best (also the first one on this map).</param>
+            <param name="Runs">Finished runs this session; 0 is "No run".</param>
+        </member>
+        <member name="M:Arcfrag.Core.Contract.ModeHudSurfSummary.#ctor(System.String,System.String,System.Boolean,System.Int32)">
+            <summary>The surf numbers of one player for the map-end summary (this map session only).</summary>
+            <param name="Best">Best finished run of the session, for example "0:52.342"; null: no finished run ("No run").</param>
+            <param name="PbDelta">How much the session beat the PB from before the session, with sign, for example "−1.204"; null: not beaten, or no PB before.</param>
+            <param name="NewPb">The session set a new personal best (also the first one on this map).</param>
+            <param name="Runs">Finished runs this session; 0 is "No run".</param>
+        </member>
+        <member name="P:Arcfrag.Core.Contract.ModeHudSurfSummary.Best">
+            <summary>Best finished run of the session, for example "0:52.342"; null: no finished run ("No run").</summary>
+        </member>
+        <member name="P:Arcfrag.Core.Contract.ModeHudSurfSummary.PbDelta">
+            <summary>How much the session beat the PB from before the session, with sign, for example "−1.204"; null: not beaten, or no PB before.</summary>
+        </member>
+        <member name="P:Arcfrag.Core.Contract.ModeHudSurfSummary.NewPb">
+            <summary>The session set a new personal best (also the first one on this map).</summary>
+        </member>
+        <member name="P:Arcfrag.Core.Contract.ModeHudSurfSummary.Runs">
+            <summary>Finished runs this session; 0 is "No run".</summary>
         </member>
         <member name="T:Arcfrag.Core.Contract.IPlatformUi">
             <summary>

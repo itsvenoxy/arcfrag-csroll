@@ -28,7 +28,24 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!--
+      ArcfragCore's shared contract, compile-time only (IPlatformConsole = "arcfrag:core_console", contract 0.11.0).
+      ArcfragCore ships it as exports, SwiftlyS2 loads them once for every plugin, so Private=false and never copied:
+      a private copy would give CSRoll and ArcfragCore different types. Built from arcfrag-core by scripts/update-contracts.sh.
+    -->
+    <Reference Include="ArcfragCore.Contract">
+      <HintPath>$(MSBuildThisFileDirectory)lib/arcfrag/ArcfragCore.Contract.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Arcfrag.Contracts">
+      <HintPath>$(MSBuildThisFileDirectory)lib/arcfrag/Arcfrag.Contracts.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
     <Compile Remove="examples\**\*.cs" />
+    <Compile Remove="tests\**\*.cs" />
   </ItemGroup>
 
   <Target Name="CreateZip" AfterTargets="Publish">

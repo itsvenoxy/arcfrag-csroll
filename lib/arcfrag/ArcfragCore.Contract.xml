@@ -1,0 +1,625 @@
+<?xml version="1.0"?>
+<doc>
+    <assembly>
+        <name>ArcfragCore.Contract</name>
+    </assembly>
+    <members>
+        <member name="T:Arcfrag.Core.Contract.IPlatformConsole">
+            <summary>
+            The game log of the web admin's servers page (contract 0.11.0, ArcfragCore 0.18.0): a mode plugin (surf, csroll, …)
+            hands the log lines admins should see to PlatformCore, which keeps the last 500 per plugin and sends them to
+            arcfrag-stats with its 30 s cycle. Shared interface key <see cref="F:Arcfrag.Core.Contract.PlatformCoreCapabilities.PlatformConsoleName"/>.
+            </summary>
+            <remarks>
+            <para>
+            Safe from any thread; never blocks and never throws. PlatformCore removes IP addresses and secrets (the server
+            passwords, <c>password=…</c>, <c>Bearer …</c>) before a line is kept, but a plugin should not write player IPs or
+            credentials in the first place.
+            </para>
+            <code>
+            public override void UseSharedInterface(IInterfaceManager interfaces)
+            {
+                _console = interfaces.TryGetSharedInterface&lt;IPlatformConsole&gt;(PlatformCoreCapabilities.PlatformConsoleName, out var c) ? c : null;
+            }
+            // next to Core.Logger.LogInformation(...):
+            _console?.Write("csroll", "info", "Perk config reloaded: 42 perks");
+            </code>
+            </remarks>
+        </member>
+        <member name="M:Arcfrag.Core.Contract.IPlatformConsole.Write(System.String,System.String,System.String)">
+            <summary>
+            Keeps one line. <paramref name="plugin"/> = the plugin's slug as in the presence report (<c>surf</c>, <c>csroll</c>;
+            lowercase letters, digits, '-'; <c>core</c> is PlatformCore's own). <paramref name="level"/> = <c>debug</c>,
+            <c>info</c>, <c>warn</c> or <c>error</c> (others count as info). Text longer than 1000 characters is cut.
+            </summary>
+            <returns><c>false</c> when the line was not kept (game log off, invalid plugin slug, empty text).</returns>
+        </member>
+        <member name="T:Arcfrag.Core.Contract.PlatformCoreStatus">
+            <summary>Connectivity and queue state exposed to operators and future mode plugins.</summary>
+        </member>
+        <member name="M:Arcfrag.Core.Contract.PlatformCoreStatus.#ctor(System.Guid,System.Guid,System.String,System.String,System.String,System.String,System.Boolean,System.Nullable{System.DateTimeOffset},System.Nullable{System.DateTimeOffset},System.String,System.Int32,System.Int32,System.Int64,System.Int64,System.Int32,System.String)">
+            <summary>Connectivity and queue state exposed to operators and future mode plugins.</summary>
+        </member>
+        <member name="T:Arcfrag.Core.Contract.IPlatformEvents">
+            <summary>
+            The capability future mode plugins (Deathmatch, Retake, Training, Party, Duels) use to reach the
+            platform.
+            </summary>
+            <remarks>
+            <para>
+            This is deliberately the <b>only</b> supported integration point. Implementations own the
+            backend URL, HTTP transport, authentication and retry policy, so a mode plugin never handles
+            credentials or builds its own client.
+            </para>
+            <para>
+            Retrieve it through SwiftlyS2's shared interfaces (<c>IInterfaceManager</c>), under the key
+            <see cref="F:Arcfrag.Core.Contract.PlatformCoreCapabilities.PlatformEventsName"/>:
+            </para>
+            <code>
+            public override void UseSharedInterface(IInterfaceManager interfaces)
+            {
+                interfaces.TryGetSharedInterface&lt;IPlatformEvents&gt;(PlatformCoreCapabilities.PlatformEventsName, out _platform);
+                _platform?.SetMode("retake");
+            }
+            </code>
+            <para>
+            All members are safe to call from the CS2 game thread: they capture data and return immediately
+            without performing network I/O inline.
+            </para>
+            </remarks>
+        </member>
+        <member name="P:Arcfrag.Core.Contract.IPlatformEvents.InstanceId">
+            <summary>Identifier of this game-server instance in the platform.</summary>
+        </member>
+        <member name="P:Arcfrag.Core.Contract.IPlatformEvents.CurrentMode">
+            <summary>Mode slug currently reported to the platform.</summary>
+        </member>
+        <member name="P:Arcfrag.Core.Contract.IPlatformEvents.IsRegistered">
+            <summary>True once the backend has accepted registration for this instance.</summary>
+        </member>
+        <member name="M:Arcfrag.Core.Contract.IPlatformEvents.EmitAsync(Arcfrag.Core.Contract.PlatformEventRequest)">
+            <summary>
+            Queues a platform event for delivery with PlatformCore's retry policy.
+            </summary>
+            <remarks>
+            <para>
+            V1 accepts <c>player_connected</c> and <c>player_disconnected</c> (which PlatformCore already
+            emits itself) and <c>match_completed</c>, the one event a mode plugin sends: pass
+            <see cref="F:Arcfrag.Contracts.V1.PlatformEventTypes.MatchCompleted"/>, a null <c>SteamId64</c> and a
+            <see cref="T:Arcfrag.Contracts.V1.MatchCompleted"/> payload once a match has ended. PlatformCore validates it with
+            <see cref="T:Arcfrag.Contracts.V1.MatchCompletedValidation"/>, requires its mode to be <see cref="P:Arcfrag.Core.Contract.IPlatformEvents.CurrentMode"/>, wraps it
+            in a version 1 envelope with a new event ID and queues it; retries repeat that event ID.
+            </para>
+            <para>Unknown event types and invalid matches are rejected and logged rather than sent.</para>
+            </remarks>
+            <returns><c>true</c> when the event was accepted into the queue.</returns>
+        </member>
+        <member name="M:Arcfrag.Core.Contract.IPlatformEvents.SetMode(System.String)">
+            <summary>
+            Reports the gameplay mode this instance is now running, so registration, heartbeats and
+            future sessions describe it correctly. The value must be a backend slug such as <c>retake</c>.
+            </summary>
+            <returns><c>false</c> when the slug is invalid, leaving the previous mode unchanged.</returns>
+        </member>
+        <member name="M:Arcfrag.Core.Contract.IPlatformEvents.GetStatus">
+            <summary>Returns the current PlatformCore status for diagnostics.</summary>
+        </member>
+        <member name="M:Arcfrag.Core.Contract.IPlatformEvents.FindSessionId(System.String)">
+            <summary>Looks up the active platform session ID for a connected Steam identity, if any.</summary>
+        </member>
+        <member name="M:Arcfrag.Core.Contract.IPlatformEvents.ReportKill(System.Guid,System.DateTimeOffset,Arcfrag.Contracts.V1.KillRecord)">
+            <summary>
+            Reports one kill between two humans in a per-kill Elo mode (Deathmatch variants). PlatformCore adds it to the
+            match's next <c>kill_batch</c> (sent every 10 seconds and before the match's <c>match_completed</c>), computes the
+            provisional Elo change from its cache with the same rules as the API, shows the kill feedback and returns it.
+            Bots, suicides and world deaths are never reported. Safe on the game thread; no network I/O inline.
+            </summary>
+            <param name="matchId">The mode plugin's match; a new ID starts a new batch sequence.</param>
+            <param name="matchStartedAt">When that match started (offsets in <paramref name="kill"/> count from it).</param>
+            <returns>The provisional rating, or null when the kill was refused (not a per-kill mode, invalid, PlatformCore disabled).</returns>
+        </member>
+        <member name="T:Arcfrag.Core.Contract.KillFeedback">
+            <summary>
+            Provisional rating of a reported kill, from PlatformCore's cached Elo. The API's answer replaces it within about
+            ten seconds; both use <see cref="T:Arcfrag.Contracts.V1.LiveElo"/>, so they normally agree exactly.
+            </summary>
+            <param name="Ignored">A <see cref="T:Arcfrag.Contracts.V1.KillIgnoredReasons"/> value; empty when the kill changes Elo.</param>
+            <param name="KillerElo">The killer's provisional Elo after this kill.</param>
+            <param name="VictimElo">The victim's provisional Elo after this kill.</param>
+        </member>
+        <member name="M:Arcfrag.Core.Contract.KillFeedback.#ctor(System.String,System.String,System.Int32,System.Int32,System.Int32,System.Int32,System.Int32,System.Int32,System.Double,System.Boolean,System.String)">
+            <summary>
+            Provisional rating of a reported kill, from PlatformCore's cached Elo. The API's answer replaces it within about
+            ten seconds; both use <see cref="T:Arcfrag.Contracts.V1.LiveElo"/>, so they normally agree exactly.
+            </summary>
+            <param name="Ignored">A <see cref="T:Arcfrag.Contracts.V1.KillIgnoredReasons"/> value; empty when the kill changes Elo.</param>
+            <param name="KillerElo">The killer's provisional Elo after this kill.</param>
+            <param name="VictimElo">The victim's provisional Elo after this kill.</param>
+        </member>
+        <member name="P:Arcfrag.Core.Contract.KillFeedback.KillerElo">
+            <summary>The killer's provisional Elo after this kill.</summary>
+        </member>
+        <member name="P:Arcfrag.Core.Contract.KillFeedback.VictimElo">
+            <summary>The victim's provisional Elo after this kill.</summary>
+        </member>
+        <member name="P:Arcfrag.Core.Contract.KillFeedback.Ignored">
+            <summary>A <see cref="T:Arcfrag.Contracts.V1.KillIgnoredReasons"/> value; empty when the kill changes Elo.</summary>
+        </member>
+        <member name="T:Arcfrag.Core.Contract.PlatformEventRequest">
+            <summary>A request from another plugin to emit a platform event.</summary>
+            <param name="EventType">A stable V1 wire identifier from <c>PlatformEventTypes</c>.</param>
+            <param name="SteamId64">The immutable player identity, when the event concerns a player.</param>
+            <param name="Payload">The payload matching the event type's V1 contract.</param>
+        </member>
+        <member name="M:Arcfrag.Core.Contract.PlatformEventRequest.#ctor(System.String,System.String,System.Object)">
+            <summary>A request from another plugin to emit a platform event.</summary>
+            <param name="EventType">A stable V1 wire identifier from <c>PlatformEventTypes</c>.</param>
+            <param name="SteamId64">The immutable player identity, when the event concerns a player.</param>
+            <param name="Payload">The payload matching the event type's V1 contract.</param>
+        </member>
+        <member name="P:Arcfrag.Core.Contract.PlatformEventRequest.EventType">
+            <summary>A stable V1 wire identifier from <c>PlatformEventTypes</c>.</summary>
+        </member>
+        <member name="P:Arcfrag.Core.Contract.PlatformEventRequest.SteamId64">
+            <summary>The immutable player identity, when the event concerns a player.</summary>
+        </member>
+        <member name="P:Arcfrag.Core.Contract.PlatformEventRequest.Payload">
+            <summary>The payload matching the event type's V1 contract.</summary>
+        </member>
+        <member name="T:Arcfrag.Core.Contract.PlatformCoreCapabilities">
+            <summary>
+            Keys of PlatformCore's shared interfaces. PlatformCore registers them in <c>ConfigureSharedInterface</c>; a mode plugin
+            reads them in <c>UseSharedInterface</c> with <c>TryGetSharedInterface</c>. SwiftlyS2 runs that pair again whenever the
+            plugin set changes (a hot reload of either plugin), so a consumer must replace, not keep, what it read before.
+            </summary>
+        </member>
+        <member name="F:Arcfrag.Core.Contract.PlatformCoreCapabilities.PlatformEventsName">
+            <summary>Key of <see cref="T:Arcfrag.Core.Contract.IPlatformEvents"/>.</summary>
+        </member>
+        <member name="F:Arcfrag.Core.Contract.PlatformCoreCapabilities.PlatformUiName">
+            <summary>Key of <see cref="T:Arcfrag.Core.Contract.IPlatformUi"/>.</summary>
+        </member>
+        <member name="F:Arcfrag.Core.Contract.PlatformCoreCapabilities.PlatformMenuName">
+            <summary>Key of <see cref="T:Arcfrag.Core.Contract.IPlatformMenu"/>.</summary>
+        </member>
+        <member name="F:Arcfrag.Core.Contract.PlatformCoreCapabilities.PlatformModeHudName">
+            <summary>Key of <see cref="T:Arcfrag.Core.Contract.IPlatformModeHud"/>.</summary>
+        </member>
+        <member name="F:Arcfrag.Core.Contract.PlatformCoreCapabilities.PlatformConsoleName">
+            <summary>Key of <see cref="T:Arcfrag.Core.Contract.IPlatformConsole"/> (contract 0.11.0).</summary>
+        </member>
+        <member name="T:Arcfrag.Core.Contract.IPlatformMenu">
+            <summary>
+            The Arcfrag menu of every server (stage 4d), driven with the mouse: move it up and down to choose, left click to
+            select, right click to go back, E to close. PlatformCore owns the main pages (stats, players, top 10, this match,
+            servers, settings, rules, links) and the end-of-match hub; a mode plugin adds its own pages and fills the hub.
+            </summary>
+            <remarks>Shared interface key <see cref="F:Arcfrag.Core.Contract.PlatformCoreCapabilities.PlatformMenuName"/>. Every member runs on the game thread.</remarks>
+        </member>
+        <member name="M:Arcfrag.Core.Contract.IPlatformMenu.AddPage(System.String,System.String,System.Func{System.Int32,Arcfrag.Core.Contract.PlatformMenuPage})">
+            <summary>
+            Adds (or replaces) a main-menu entry of the mode. <paramref name="build"/> is called with the player's slot each
+            time the entry is opened; null shows nothing.
+            </summary>
+        </member>
+        <member name="M:Arcfrag.Core.Contract.IPlatformMenu.Open(System.Int32)">
+            <summary>Opens the main menu for the player in <paramref name="slot"/>.</summary>
+        </member>
+        <member name="M:Arcfrag.Core.Contract.IPlatformMenu.ShowMatchHub(Arcfrag.Core.Contract.PlatformMatchHub)">
+            <summary>
+            Opens the match hub for every human whose setting allows it: their result, the match's Elo change, their best
+            streak and nemesis, and the buttons Stay, Other servers and Vote next map. The vote closes after
+            <see cref="P:Arcfrag.Core.Contract.PlatformMatchHub.VoteDuration"/> and reports the winner (null without votes) to the mode.
+            </summary>
+        </member>
+        <member name="T:Arcfrag.Core.Contract.PlatformMenuPage">
+            <summary>A mode's menu page: info lines and rows. A row with an action runs it with the player's slot.</summary>
+        </member>
+        <member name="M:Arcfrag.Core.Contract.PlatformMenuPage.#ctor(System.String,System.Collections.Generic.IReadOnlyList{System.String},System.Collections.Generic.IReadOnlyList{Arcfrag.Core.Contract.PlatformMenuItem})">
+            <summary>A mode's menu page: info lines and rows. A row with an action runs it with the player's slot.</summary>
+        </member>
+        <member name="T:Arcfrag.Core.Contract.PlatformMatchHub">
+            <summary>What the mode tells the hub about a finished match.</summary>
+            <param name="Headline">For example <c>Match over: time is up.</c></param>
+            <param name="Player">The line of a player (by SteamID64), or null when they did not play.</param>
+            <param name="MapChoices">Maps players can vote for as the next one; empty hides the vote.</param>
+        </member>
+        <member name="M:Arcfrag.Core.Contract.PlatformMatchHub.#ctor(System.String,System.Func{System.String,Arcfrag.Core.Contract.PlatformHubLine},System.Collections.Generic.IReadOnlyList{System.String},System.TimeSpan,System.Action{System.String})">
+            <summary>What the mode tells the hub about a finished match.</summary>
+            <param name="Headline">For example <c>Match over: time is up.</c></param>
+            <param name="Player">The line of a player (by SteamID64), or null when they did not play.</param>
+            <param name="MapChoices">Maps players can vote for as the next one; empty hides the vote.</param>
+        </member>
+        <member name="P:Arcfrag.Core.Contract.PlatformMatchHub.Headline">
+            <summary>For example <c>Match over: time is up.</c></summary>
+        </member>
+        <member name="P:Arcfrag.Core.Contract.PlatformMatchHub.Player">
+            <summary>The line of a player (by SteamID64), or null when they did not play.</summary>
+        </member>
+        <member name="P:Arcfrag.Core.Contract.PlatformMatchHub.MapChoices">
+            <summary>Maps players can vote for as the next one; empty hides the vote.</summary>
+        </member>
+        <member name="T:Arcfrag.Core.Contract.IPlatformModeHud">
+            <summary>
+            The mode HUD of the Arcfrag UI addon for game-mode plugins (first user: CSRoll): a roll reveal at the top centre, a
+            modifier bar at the left and a spectator panel in the same place while dead, plus the shared toast stack. Surf
+            (arcfrag-surf) has a timer panel at the bottom centre and a finish card at the top centre. ArcfragCore
+            draws it per player through its custom_hud_layout; the plugin only hands over plain data.
+            </summary>
+            <remarks>
+            Shared interface key <see cref="F:Arcfrag.Core.Contract.PlatformCoreCapabilities.PlatformModeHudName"/>. Every member runs on the game thread.
+            When <see cref="P:Arcfrag.Core.Contract.IPlatformModeHud.Available"/> is false (no Arcfrag UI addon on this server, a match server, or the mode is not in
+            <c>HudModes</c>) every call is ignored and the plugin keeps its own HUD (center HTML).
+            </remarks>
+        </member>
+        <member name="P:Arcfrag.Core.Contract.IPlatformModeHud.Available">
+            <summary>True when the Arcfrag UI addon is active on this server and draws the mode HUD.</summary>
+        </member>
+        <member name="M:Arcfrag.Core.Contract.IPlatformModeHud.ShowRoll(System.Int32,Arcfrag.Core.Contract.ModeHudRoll)">
+            <summary>
+            Plays the roll reveal for one player: the slot reel ("ROLLING… / ROUND n", about 1.8 s), then 1 to 3 cards whose
+            descriptions decode letter by letter; the cards leave after 7 s. <see cref="P:Arcfrag.Core.Contract.ModeHudRoll.Late"/> skips the reel and
+            shows the gold "NEW MODIFIER" card instead. A new roll replaces a running one.
+            </summary>
+        </member>
+        <member name="M:Arcfrag.Core.Contract.IPlatformModeHud.SetModBar(System.Int32,Arcfrag.Core.Contract.ModeHudBar)">
+            <summary>
+            Sets the modifier bar of one player (chip + up to 3 widgets); null hides it. Meant to be called up to 10 times per
+            second: only changed texts and classes reach the client. While a roll reveal runs the bar waits until the cards
+            are read (5.2 s into the roll).
+            </summary>
+        </member>
+        <member name="M:Arcfrag.Core.Contract.IPlatformModeHud.SetSpectator(System.Int32,Arcfrag.Core.Contract.ModeHudSpectator)">
+            <summary>Sets the spectator panel of one player (who they watch and that player's modifiers); null hides it. It replaces the modifier bar while shown.</summary>
+        </member>
+        <member name="M:Arcfrag.Core.Contract.IPlatformModeHud.Toast(System.Int32,System.String,System.String,System.String)">
+            <summary>
+            A toast in the shared toast stack (right middle). <paramref name="tone"/>: Success, Warning, Danger, Info, Gold or
+            Neutral, or a modifier tone (Buff, Nerf, Chaos, Ability); anything else is Neutral.
+            </summary>
+        </member>
+        <member name="M:Arcfrag.Core.Contract.IPlatformModeHud.SetSurfTimer(System.Int32,Arcfrag.Core.Contract.ModeHudSurfTimer)">
+            <summary>
+            Sets the surf timer panel of one player (bottom centre); null hides it. Meant to be called every frame or tick:
+            at most 10 draws per second reach the client (the latest value wins) and only changed texts and classes are sent.
+            </summary>
+        </member>
+        <member name="M:Arcfrag.Core.Contract.IPlatformModeHud.ShowSurfFinish(System.Int32,Arcfrag.Core.Contract.ModeHudSurfFinish)">
+            <summary>
+            Shows the surf finish card of one player (top centre) for 6 s, a map record for 8 s, then it leaves. A new finish
+            replaces a shown one.
+            </summary>
+        </member>
+        <member name="M:Arcfrag.Core.Contract.IPlatformModeHud.SetSurfSummary(System.Int32,Arcfrag.Core.Contract.ModeHudSurfSummary)">
+            <summary>
+            Sets the surf numbers of one player for the map-end summary (best run of this map session, PB improvement); null
+            forgets them. Call it whenever they change (after every finished run) or at the latest at map end. ArcfragCore shows
+            the summary at the end of the map (win panel); a call after that redraws it. A player without numbers or without a
+            finished run gets "No run". Contract 0.10.0+.
+            </summary>
+        </member>
+        <member name="T:Arcfrag.Core.Contract.ModeHudCategory">
+            <summary>What a modifier is about, picks the icon.</summary>
+        </member>
+        <member name="T:Arcfrag.Core.Contract.ModeHudTone">
+            <summary>How a modifier plays, picks the color: Buff green, Nerf red, Chaos orange, Ability gold.</summary>
+        </member>
+        <member name="T:Arcfrag.Core.Contract.ModeHudModifier">
+            <summary>One modifier as shown on a card, the chip and the spectator panel.</summary>
+        </member>
+        <member name="M:Arcfrag.Core.Contract.ModeHudModifier.#ctor(System.String,System.String,Arcfrag.Core.Contract.ModeHudCategory,Arcfrag.Core.Contract.ModeHudTone)">
+            <summary>One modifier as shown on a card, the chip and the spectator panel.</summary>
+        </member>
+        <member name="T:Arcfrag.Core.Contract.ModeHudRoll">
+            <summary>A roll reveal.</summary>
+            <param name="Round">Shown as "ROUND n" on the reel; 0 or less hides the number.</param>
+            <param name="Cards">The 1 to 3 modifiers the player got (more are cut).</param>
+            <param name="Late">A modifier that joined mid-round: no reel, gold card with punch.</param>
+            <param name="Reel">Names the reel cycles through before it lands on the first card; empty uses the card names.</param>
+        </member>
+        <member name="M:Arcfrag.Core.Contract.ModeHudRoll.#ctor(System.Int32,System.Collections.Generic.IReadOnlyList{Arcfrag.Core.Contract.ModeHudModifier},System.Boolean,System.Collections.Generic.IReadOnlyList{System.String})">
+            <summary>A roll reveal.</summary>
+            <param name="Round">Shown as "ROUND n" on the reel; 0 or less hides the number.</param>
+            <param name="Cards">The 1 to 3 modifiers the player got (more are cut).</param>
+            <param name="Late">A modifier that joined mid-round: no reel, gold card with punch.</param>
+            <param name="Reel">Names the reel cycles through before it lands on the first card; empty uses the card names.</param>
+        </member>
+        <member name="P:Arcfrag.Core.Contract.ModeHudRoll.Round">
+            <summary>Shown as "ROUND n" on the reel; 0 or less hides the number.</summary>
+        </member>
+        <member name="P:Arcfrag.Core.Contract.ModeHudRoll.Cards">
+            <summary>The 1 to 3 modifiers the player got (more are cut).</summary>
+        </member>
+        <member name="P:Arcfrag.Core.Contract.ModeHudRoll.Late">
+            <summary>A modifier that joined mid-round: no reel, gold card with punch.</summary>
+        </member>
+        <member name="P:Arcfrag.Core.Contract.ModeHudRoll.Reel">
+            <summary>Names the reel cycles through before it lands on the first card; empty uses the card names.</summary>
+        </member>
+        <member name="T:Arcfrag.Core.Contract.ModeHudBar">
+            <summary>The modifier bar: the chip lists the player's modifiers (one: name + tone tag, more: icons + "n MODIFIERS").</summary>
+        </member>
+        <member name="M:Arcfrag.Core.Contract.ModeHudBar.#ctor(System.Collections.Generic.IReadOnlyList{Arcfrag.Core.Contract.ModeHudModifier},System.Collections.Generic.IReadOnlyList{Arcfrag.Core.Contract.ModeHudWidget})">
+            <summary>The modifier bar: the chip lists the player's modifiers (one: name + tone tag, more: icons + "n MODIFIERS").</summary>
+        </member>
+        <member name="T:Arcfrag.Core.Contract.ModeHudWidgetKind">
+            <summary>Layout of a widget on the modifier bar.</summary>
+        </member>
+        <member name="F:Arcfrag.Core.Contract.ModeHudWidgetKind.Ability">
+            <summary>Key-triggered power: Ready / Active / Cooldown, key hint, bar, time.</summary>
+        </member>
+        <member name="F:Arcfrag.Core.Contract.ModeHudWidgetKind.Gauge">
+            <summary>A level in percent (fuel, concealment): gold above 60, orange (Warn) above 25, red (Bad) below.</summary>
+        </member>
+        <member name="F:Arcfrag.Core.Contract.ModeHudWidgetKind.Value">
+            <summary>A number without a bar (HP/s), Boosted in gold.</summary>
+        </member>
+        <member name="F:Arcfrag.Core.Contract.ModeHudWidgetKind.Rotor">
+            <summary>A rotating timer: idle countdown, Spinning reel (with <see cref="P:Arcfrag.Core.Contract.ModeHudWidget.Before"/>/<see cref="P:Arcfrag.Core.Contract.ModeHudWidget.After"/>), Landed.</summary>
+        </member>
+        <member name="F:Arcfrag.Core.Contract.ModeHudWidgetKind.Stolen">
+            <summary>A stolen modifier (Mimic) with its icon; Empty before the first steal.</summary>
+        </member>
+        <member name="T:Arcfrag.Core.Contract.ModeHudState">
+            <summary>State of a widget; picks colors and the fill color.</summary>
+        </member>
+        <member name="T:Arcfrag.Core.Contract.ModeHudWidget">
+            <summary>One widget of the modifier bar.</summary>
+            <param name="Title">Small uppercase label, for example "Jetpack · fuel".</param>
+            <param name="Key">Key hint at the right (F, Space, Inspect); null hides it.</param>
+            <param name="Value">The big value (READY, 48%, 12 HP/s, AK-47).</param>
+            <param name="Text">The small text at the right (Press F, 2.4s left, Next swap in 8s).</param>
+            <param name="Percent">Bar fill 0 to 100 (clamped); below 0 hides the bar.</param>
+            <param name="Category">Stolen: icon of the stolen modifier.</param>
+            <param name="Tone">Stolen: color of the stolen modifier.</param>
+            <param name="Before">Rotor while spinning: the dim name before the current one.</param>
+            <param name="After">Rotor while spinning: the dim name after the current one.</param>
+        </member>
+        <member name="M:Arcfrag.Core.Contract.ModeHudWidget.#ctor(Arcfrag.Core.Contract.ModeHudWidgetKind,System.String,System.String,System.String,System.Int32,Arcfrag.Core.Contract.ModeHudState,System.String,System.Nullable{Arcfrag.Core.Contract.ModeHudCategory},System.Nullable{Arcfrag.Core.Contract.ModeHudTone},System.String,System.String)">
+            <summary>One widget of the modifier bar.</summary>
+            <param name="Title">Small uppercase label, for example "Jetpack · fuel".</param>
+            <param name="Key">Key hint at the right (F, Space, Inspect); null hides it.</param>
+            <param name="Value">The big value (READY, 48%, 12 HP/s, AK-47).</param>
+            <param name="Text">The small text at the right (Press F, 2.4s left, Next swap in 8s).</param>
+            <param name="Percent">Bar fill 0 to 100 (clamped); below 0 hides the bar.</param>
+            <param name="Category">Stolen: icon of the stolen modifier.</param>
+            <param name="Tone">Stolen: color of the stolen modifier.</param>
+            <param name="Before">Rotor while spinning: the dim name before the current one.</param>
+            <param name="After">Rotor while spinning: the dim name after the current one.</param>
+        </member>
+        <member name="P:Arcfrag.Core.Contract.ModeHudWidget.Title">
+            <summary>Small uppercase label, for example "Jetpack · fuel".</summary>
+        </member>
+        <member name="P:Arcfrag.Core.Contract.ModeHudWidget.Value">
+            <summary>The big value (READY, 48%, 12 HP/s, AK-47).</summary>
+        </member>
+        <member name="P:Arcfrag.Core.Contract.ModeHudWidget.Text">
+            <summary>The small text at the right (Press F, 2.4s left, Next swap in 8s).</summary>
+        </member>
+        <member name="P:Arcfrag.Core.Contract.ModeHudWidget.Percent">
+            <summary>Bar fill 0 to 100 (clamped); below 0 hides the bar.</summary>
+        </member>
+        <member name="P:Arcfrag.Core.Contract.ModeHudWidget.Key">
+            <summary>Key hint at the right (F, Space, Inspect); null hides it.</summary>
+        </member>
+        <member name="P:Arcfrag.Core.Contract.ModeHudWidget.Category">
+            <summary>Stolen: icon of the stolen modifier.</summary>
+        </member>
+        <member name="P:Arcfrag.Core.Contract.ModeHudWidget.Tone">
+            <summary>Stolen: color of the stolen modifier.</summary>
+        </member>
+        <member name="P:Arcfrag.Core.Contract.ModeHudWidget.Before">
+            <summary>Rotor while spinning: the dim name before the current one.</summary>
+        </member>
+        <member name="P:Arcfrag.Core.Contract.ModeHudWidget.After">
+            <summary>Rotor while spinning: the dim name after the current one.</summary>
+        </member>
+        <member name="T:Arcfrag.Core.Contract.ModeHudSpectator">
+            <summary>The spectator panel: the watched player and their modifiers (0 to 3 entries are shown).</summary>
+            <param name="Meta">One line under the name, for example "T · 64 HP".</param>
+        </member>
+        <member name="M:Arcfrag.Core.Contract.ModeHudSpectator.#ctor(System.String,System.String,System.Collections.Generic.IReadOnlyList{Arcfrag.Core.Contract.ModeHudModifier})">
+            <summary>The spectator panel: the watched player and their modifiers (0 to 3 entries are shown).</summary>
+            <param name="Meta">One line under the name, for example "T · 64 HP".</param>
+        </member>
+        <member name="P:Arcfrag.Core.Contract.ModeHudSpectator.Meta">
+            <summary>One line under the name, for example "T · 64 HP".</summary>
+        </member>
+        <member name="T:Arcfrag.Core.Contract.ModeHudSurfTimer">
+            <summary>The surf timer panel.</summary>
+            <param name="Time">Run time, for example "01:23.456".</param>
+            <param name="Speed">Horizontal speed without the unit, for example "1243" (the panel shows "u/s").</param>
+            <param name="Delta">Difference to the personal best with sign, for example "−0.482" or "+1.204"; null: no running difference (shows <see cref="P:Arcfrag.Core.Contract.ModeHudSurfTimer.Pb"/>, or nothing without a PB).</param>
+            <param name="Faster">The delta is ahead of the PB (green), else behind (red).</param>
+            <param name="Stage">Current stage, 1-based.</param>
+            <param name="Stages">Stages of the map; 1 or less is a linear map (no stage cell).</param>
+            <param name="Idle">In the start zone: time dim, delta "—".</param>
+            <param name="Done">Finished: time gold.</param>
+        </member>
+        <member name="M:Arcfrag.Core.Contract.ModeHudSurfTimer.#ctor(System.String,System.String,System.String,System.Boolean,System.Int32,System.Int32,System.Boolean,System.Boolean)">
+            <summary>The surf timer panel.</summary>
+            <param name="Time">Run time, for example "01:23.456".</param>
+            <param name="Speed">Horizontal speed without the unit, for example "1243" (the panel shows "u/s").</param>
+            <param name="Delta">Difference to the personal best with sign, for example "−0.482" or "+1.204"; null: no running difference (shows <see cref="P:Arcfrag.Core.Contract.ModeHudSurfTimer.Pb"/>, or nothing without a PB).</param>
+            <param name="Faster">The delta is ahead of the PB (green), else behind (red).</param>
+            <param name="Stage">Current stage, 1-based.</param>
+            <param name="Stages">Stages of the map; 1 or less is a linear map (no stage cell).</param>
+            <param name="Idle">In the start zone: time dim, delta "—".</param>
+            <param name="Done">Finished: time gold.</param>
+        </member>
+        <member name="P:Arcfrag.Core.Contract.ModeHudSurfTimer.Time">
+            <summary>Run time, for example "01:23.456".</summary>
+        </member>
+        <member name="P:Arcfrag.Core.Contract.ModeHudSurfTimer.Speed">
+            <summary>Horizontal speed without the unit, for example "1243" (the panel shows "u/s").</summary>
+        </member>
+        <member name="P:Arcfrag.Core.Contract.ModeHudSurfTimer.Delta">
+            <summary>Difference to the personal best with sign, for example "−0.482" or "+1.204"; null: no running difference (shows <see cref="P:Arcfrag.Core.Contract.ModeHudSurfTimer.Pb"/>, or nothing without a PB).</summary>
+        </member>
+        <member name="P:Arcfrag.Core.Contract.ModeHudSurfTimer.Faster">
+            <summary>The delta is ahead of the PB (green), else behind (red).</summary>
+        </member>
+        <member name="P:Arcfrag.Core.Contract.ModeHudSurfTimer.Stage">
+            <summary>Current stage, 1-based.</summary>
+        </member>
+        <member name="P:Arcfrag.Core.Contract.ModeHudSurfTimer.Stages">
+            <summary>Stages of the map; 1 or less is a linear map (no stage cell).</summary>
+        </member>
+        <member name="P:Arcfrag.Core.Contract.ModeHudSurfTimer.Idle">
+            <summary>In the start zone: time dim, delta "—".</summary>
+        </member>
+        <member name="P:Arcfrag.Core.Contract.ModeHudSurfTimer.Done">
+            <summary>Finished: time gold.</summary>
+        </member>
+        <member name="P:Arcfrag.Core.Contract.ModeHudSurfTimer.Pb">
+            <summary>
+            The personal best on this map, formatted like <see cref="P:Arcfrag.Core.Contract.ModeHudSurfTimer.Time"/> (for example "0:53.546"); null: no PB yet. Shown as
+            "PB 0:53.546" in the delta cell while there is no <see cref="P:Arcfrag.Core.Contract.ModeHudSurfTimer.Delta"/>. Contract 0.10.0+ (an init property, so plugins
+            built against 0.9.0 keep the same constructor).
+            </summary>
+        </member>
+        <member name="T:Arcfrag.Core.Contract.ModeHudSurfFinish">
+            <summary>The surf finish card. The look follows the highest special finish: Record &gt; Top10 &gt; Pb &gt; "Run complete".</summary>
+            <param name="Map">Map name.</param>
+            <param name="Time">Run time, for example "01:23.456".</param>
+            <param name="Delta">Difference to the previous PB with sign; null: first run ("First run").</param>
+            <param name="Faster">The delta is ahead of the PB (green), else behind (red).</param>
+            <param name="Rank">Place on the map; 0 or less hides the rank.</param>
+            <param name="Total">Ranked players on the map ("of 132"); 0 or less leaves that out.</param>
+            <param name="Pb">New personal best.</param>
+            <param name="Top10">The run is in the top 10.</param>
+            <param name="Record">New map record.</param>
+        </member>
+        <member name="M:Arcfrag.Core.Contract.ModeHudSurfFinish.#ctor(System.String,System.String,System.String,System.Boolean,System.Int32,System.Int32,System.Boolean,System.Boolean,System.Boolean)">
+            <summary>The surf finish card. The look follows the highest special finish: Record &gt; Top10 &gt; Pb &gt; "Run complete".</summary>
+            <param name="Map">Map name.</param>
+            <param name="Time">Run time, for example "01:23.456".</param>
+            <param name="Delta">Difference to the previous PB with sign; null: first run ("First run").</param>
+            <param name="Faster">The delta is ahead of the PB (green), else behind (red).</param>
+            <param name="Rank">Place on the map; 0 or less hides the rank.</param>
+            <param name="Total">Ranked players on the map ("of 132"); 0 or less leaves that out.</param>
+            <param name="Pb">New personal best.</param>
+            <param name="Top10">The run is in the top 10.</param>
+            <param name="Record">New map record.</param>
+        </member>
+        <member name="P:Arcfrag.Core.Contract.ModeHudSurfFinish.Map">
+            <summary>Map name.</summary>
+        </member>
+        <member name="P:Arcfrag.Core.Contract.ModeHudSurfFinish.Time">
+            <summary>Run time, for example "01:23.456".</summary>
+        </member>
+        <member name="P:Arcfrag.Core.Contract.ModeHudSurfFinish.Delta">
+            <summary>Difference to the previous PB with sign; null: first run ("First run").</summary>
+        </member>
+        <member name="P:Arcfrag.Core.Contract.ModeHudSurfFinish.Faster">
+            <summary>The delta is ahead of the PB (green), else behind (red).</summary>
+        </member>
+        <member name="P:Arcfrag.Core.Contract.ModeHudSurfFinish.Rank">
+            <summary>Place on the map; 0 or less hides the rank.</summary>
+        </member>
+        <member name="P:Arcfrag.Core.Contract.ModeHudSurfFinish.Total">
+            <summary>Ranked players on the map ("of 132"); 0 or less leaves that out.</summary>
+        </member>
+        <member name="P:Arcfrag.Core.Contract.ModeHudSurfFinish.Pb">
+            <summary>New personal best.</summary>
+        </member>
+        <member name="P:Arcfrag.Core.Contract.ModeHudSurfFinish.Top10">
+            <summary>The run is in the top 10.</summary>
+        </member>
+        <member name="P:Arcfrag.Core.Contract.ModeHudSurfFinish.Record">
+            <summary>New map record.</summary>
+        </member>
+        <member name="T:Arcfrag.Core.Contract.ModeHudSurfSummary">
+            <summary>The surf numbers of one player for the map-end summary (this map session only).</summary>
+            <param name="Best">Best finished run of the session, for example "0:52.342"; null: no finished run ("No run").</param>
+            <param name="PbDelta">How much the session beat the PB from before the session, with sign, for example "−1.204"; null: not beaten, or no PB before.</param>
+            <param name="NewPb">The session set a new personal best (also the first one on this map).</param>
+            <param name="Runs">Finished runs this session; 0 is "No run".</param>
+        </member>
+        <member name="M:Arcfrag.Core.Contract.ModeHudSurfSummary.#ctor(System.String,System.String,System.Boolean,System.Int32)">
+            <summary>The surf numbers of one player for the map-end summary (this map session only).</summary>
+            <param name="Best">Best finished run of the session, for example "0:52.342"; null: no finished run ("No run").</param>
+            <param name="PbDelta">How much the session beat the PB from before the session, with sign, for example "−1.204"; null: not beaten, or no PB before.</param>
+            <param name="NewPb">The session set a new personal best (also the first one on this map).</param>
+            <param name="Runs">Finished runs this session; 0 is "No run".</param>
+        </member>
+        <member name="P:Arcfrag.Core.Contract.ModeHudSurfSummary.Best">
+            <summary>Best finished run of the session, for example "0:52.342"; null: no finished run ("No run").</summary>
+        </member>
+        <member name="P:Arcfrag.Core.Contract.ModeHudSurfSummary.PbDelta">
+            <summary>How much the session beat the PB from before the session, with sign, for example "−1.204"; null: not beaten, or no PB before.</summary>
+        </member>
+        <member name="P:Arcfrag.Core.Contract.ModeHudSurfSummary.NewPb">
+            <summary>The session set a new personal best (also the first one on this map).</summary>
+        </member>
+        <member name="P:Arcfrag.Core.Contract.ModeHudSurfSummary.Runs">
+            <summary>Finished runs this session; 0 is "No run".</summary>
+        </member>
+        <member name="T:Arcfrag.Core.Contract.IPlatformUi">
+            <summary>
+            The shared in-game UI of every Arcfrag server: one chat style (<c>[Arcfrag]</c> in the brand color), the cached
+            Elo of the players, and the "This match" page of <c>!menu</c>. Mode plugins print through this instead of
+            chat messages with prefixes of their own.
+            </summary>
+            <remarks>
+            Retrieve it like <see cref="T:Arcfrag.Core.Contract.IPlatformEvents"/>, with the shared interface key <see cref="F:Arcfrag.Core.Contract.PlatformCoreCapabilities.PlatformUiName"/>.
+            Every member must be called on the CS2 game thread.
+            </remarks>
+        </member>
+        <member name="M:Arcfrag.Core.Contract.IPlatformUi.PrintToAll(System.String)">
+            <summary>Prints one chat line to everyone, prefixed with <c>[Arcfrag]</c>.</summary>
+        </member>
+        <member name="M:Arcfrag.Core.Contract.IPlatformUi.PrintToPlayer(System.Int32,System.String)">
+            <summary>Prints one chat line to the player in <paramref name="slot"/>, prefixed with <c>[Arcfrag]</c>.</summary>
+        </member>
+        <member name="M:Arcfrag.Core.Contract.IPlatformUi.PrintToCenter(System.Int32,System.String)">
+            <summary>Shows a short center text to the player in <paramref name="slot"/>.</summary>
+        </member>
+        <member name="M:Arcfrag.Core.Contract.IPlatformUi.GetPlayer(System.String)">
+            <summary>The cached standing of a player in the current mode, or null before the API answered.</summary>
+        </member>
+        <member name="M:Arcfrag.Core.Contract.IPlatformUi.SetMatchInfoProvider(System.Func{System.String,Arcfrag.Core.Contract.PlatformMatchInfo})">
+            <summary>
+            Supplies the "This match" page of <c>!menu</c> and the match part of <c>!stats</c>: called on the game thread with
+            the asking player's SteamID64. Pass null to remove it (for example on unload).
+            </summary>
+        </member>
+        <member name="T:Arcfrag.Core.Contract.PlatformPlayerView">
+            <summary>A player's cached standing: Elo (provisional kill deltas included), rank, ranked matches, this match's delta.</summary>
+            <param name="Rank">Leaderboard rank; null while unranked.</param>
+            <param name="MatchDelta">Elo change in the current match so far (per-kill modes).</param>
+            <param name="BestStreak">Longest kill streak in this mode and season.</param>
+        </member>
+        <member name="M:Arcfrag.Core.Contract.PlatformPlayerView.#ctor(System.String,System.Int32,System.Nullable{System.Int32},System.Int32,System.Int32,System.Int32)">
+            <summary>A player's cached standing: Elo (provisional kill deltas included), rank, ranked matches, this match's delta.</summary>
+            <param name="Rank">Leaderboard rank; null while unranked.</param>
+            <param name="MatchDelta">Elo change in the current match so far (per-kill modes).</param>
+            <param name="BestStreak">Longest kill streak in this mode and season.</param>
+        </member>
+        <member name="P:Arcfrag.Core.Contract.PlatformPlayerView.Rank">
+            <summary>Leaderboard rank; null while unranked.</summary>
+        </member>
+        <member name="P:Arcfrag.Core.Contract.PlatformPlayerView.MatchDelta">
+            <summary>Elo change in the current match so far (per-kill modes).</summary>
+        </member>
+        <member name="P:Arcfrag.Core.Contract.PlatformPlayerView.BestStreak">
+            <summary>Longest kill streak in this mode and season.</summary>
+        </member>
+        <member name="T:Arcfrag.Core.Contract.PlatformMatchInfo">
+            <summary>What a mode plugin knows about the running match, from one player's point of view.</summary>
+            <param name="TimeLeft">Until the match ends by time; null without a time limit.</param>
+            <param name="Place">The player's current place (1 = leading); null when they are not tracked.</param>
+        </member>
+        <member name="M:Arcfrag.Core.Contract.PlatformMatchInfo.#ctor(System.Nullable{System.TimeSpan},System.String,System.Int32,System.Nullable{System.Int32},System.Int32,System.Int32,System.Int32,System.Int32)">
+            <summary>What a mode plugin knows about the running match, from one player's point of view.</summary>
+            <param name="TimeLeft">Until the match ends by time; null without a time limit.</param>
+            <param name="Place">The player's current place (1 = leading); null when they are not tracked.</param>
+        </member>
+        <member name="P:Arcfrag.Core.Contract.PlatformMatchInfo.TimeLeft">
+            <summary>Until the match ends by time; null without a time limit.</summary>
+        </member>
+        <member name="P:Arcfrag.Core.Contract.PlatformMatchInfo.Place">
+            <summary>The player's current place (1 = leading); null when they are not tracked.</summary>
+        </member>
+    </members>
+</doc>

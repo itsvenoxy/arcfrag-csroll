@@ -178,9 +178,13 @@ public sealed class ModifierRuntime
     public IReadOnlyList<GameModifierBase> RegisteredModifiers => _registeredModifiers;
     public IReadOnlyList<GameModifierBase> ActiveModifiers => _activeModifiers;
 
-    public ModifierRuntime(ISwiftlyCore core, CSRollConfig config, ICvarRollbackService cvarService)
+    /// <summary>Lines for the web admin (Servers → Console); see <see cref="CSRoll.Core.GameLog"/>.</summary>
+    public GameLog GameLog { get; }
+
+    public ModifierRuntime(ISwiftlyCore core, CSRollConfig config, ICvarRollbackService cvarService, GameLog gameLog)
     {
         _core = core;
+        GameLog = gameLog;
         Config = config;
         _cvarService = cvarService;
         MinRandomRounds = config.MinRandomRounds;
@@ -216,6 +220,7 @@ public sealed class ModifierRuntime
             if (seenNames.Contains(modifier.Name, StringComparer.OrdinalIgnoreCase))
             {
                 _core.Logger.LogWarning("[CSRoll] Duplicate modifier name {Name} - all modifier names should be unique!", modifier.Name);
+                GameLog.Warn($"Duplicate modifier name {modifier.Name} - all modifier names should be unique");
                 continue;
             }
 
@@ -227,6 +232,7 @@ public sealed class ModifierRuntime
             if (_registeredModifiers.Count == 0)
             {
                 _core.Logger.LogWarning("[CSRoll] No modifiers are registered! Cannot activate random rounds by default.");
+                GameLog.Warn("No modifiers are registered - random rounds cannot start by default");
             }
             else
             {
@@ -461,6 +467,7 @@ public sealed class ModifierRuntime
             RemoveAllModifiers();
         }
 
+        GameLog.Info(RandomRoundsEnabled ? "Random rounds enabled (from the next round)" : "Random rounds disabled");
         CSRollUtils.PrintTitleToChatAll(_core, RandomRoundsEnabled ? "Random rounds enabled for next round!" : "Random rounds disabled!");
         CSRollUtils.ShowMessageCentreAll(_core, CSRollUtils.BuildRandomRoundsToggleHtml(RandomRoundsEnabled), 4000);
     }

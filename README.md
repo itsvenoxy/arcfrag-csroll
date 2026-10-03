@@ -103,6 +103,12 @@ All commands are chat commands (prefix with `!`).
 
 Requires [SwiftlyS2](https://swiftlys2.net) to be installed on your CS2 server.
 
+### Arcfrag web admin log
+
+With ArcfragCore 0.18.0 or later (shared interface `arcfrag:core_console`, contract 0.11.0) the important lines also go to the web admin (Servers → Console, plugin `csroll`): load/unload, config reload and reload errors, map change, random rounds on/off, registration warnings. Nothing per round or per player. Without ArcfragCore, or with an older one, CSRoll runs unchanged and only the server log gets the lines.
+
+The contract DLLs in `lib/arcfrag/` are compile-time only (ArcfragCore ships them to the server). After a contract change in arcfrag-core run `scripts/update-contracts.sh <path-to-arcfrag-core>` and commit the result. Tests: `dotnet test tests/CSRoll.Tests`.
+
 ## Credits
 
 CSRoll is a SwiftlyS2/C# reimplementation, inspired by CounterStrikeSharp game modifiers plugin:

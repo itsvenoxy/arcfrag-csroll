@@ -60,6 +60,8 @@ public partial class CSRoll
     {
         _lastRoundStartHandledTime = float.NegativeInfinity;
         Runtime.ResetMapRelativeTimeState();
+        GameLog.Info($"Map {@event.MapName}: random rounds {(Runtime.RandomRoundsEnabled ? "on" : "off")}, "
+            + $"{Runtime.RegisteredModifiers.Count} modifiers registered");
     }
 
     public HookResult OnRoundStart(EventRoundStart @event)

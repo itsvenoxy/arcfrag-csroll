@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <!-- Framework-free classes only, compiled in directly: the plugin itself needs the SwiftlyS2 server at runtime. -->
+    <Compile Include="../../src/Core/GameLog.cs" Link="src/GameLog.cs" />
+    <!-- The contract is provided by ArcfragCore on the server; the test host loads it from here. -->
+    <Reference Include="ArcfragCore.Contract">
+      <HintPath>$(MSBuildThisFileDirectory)../../lib/arcfrag/ArcfragCore.Contract.dll</HintPath>
+    </Reference>
+    <Reference Include="Arcfrag.Contracts">
+      <HintPath>$(MSBuildThisFileDirectory)../../lib/arcfrag/Arcfrag.Contracts.dll</HintPath>
+    </Reference>
+    <Using Include="Xunit" />
+  </ItemGroup>
+</Project>

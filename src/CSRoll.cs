@@ -37,8 +37,29 @@ public partial class CSRoll : BasePlugin
     {
     }
 
+    /// <summary>The "Random Perk" tab of ArcfragCore's !admin panel and the !arc This match lines (contract 0.15.0).</summary>
+    private Integration.RandomPerkModeAdmin? _modeAdmin;
+
     public override void ConfigureSharedInterface(IInterfaceManager interfaceManager)
     {
+        try
+        {
+            AddModeAdmin(interfaceManager);
+        }
+        catch (Exception error) when (error is FileNotFoundException or FileLoadException or TypeLoadException or MissingMethodException)
+        {
+            // ArcfragCore.Contract missing or older than 0.12.0 (no IPlatformModeAdmin): no Random Perk tab, !rollmenu still works.
+            Core.Logger.LogWarning(error, "[CSRoll] ArcfragCore.Contract has no IPlatformModeAdmin - the !admin Random Perk tab needs ArcfragCore 0.36.0");
+        }
+    }
+
+    /// <summary>The only method naming IPlatformModeAdmin here; not inlined, so a missing assembly fails here.</summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private void AddModeAdmin(IInterfaceManager interfaceManager)
+    {
+        _modeAdmin ??= new Integration.RandomPerkModeAdmin(this, Core);
+        interfaceManager.AddSharedInterface<Arcfrag.Core.Contract.IPlatformModeAdmin, Integration.RandomPerkModeAdmin>(
+            Arcfrag.Core.Contract.PlatformCoreCapabilities.PlatformModeAdminName, _modeAdmin);
     }
 
     /// <summary>ArcfragCore's mode HUD (Arcfrag UI addon), or null - kept here because Load() can rebuild Runtime.</summary>
@@ -112,6 +133,7 @@ public partial class CSRoll : BasePlugin
 
         Runtime = new ModifierRuntime(Core, Config, _cvarService);
         Runtime.ModeHud = _modeHud;
+        _modeAdmin?.Reset();
         Runtime.Initialise(BuildModifierFactories());
 
         // Installed even while CustomHud.Enabled is false: it does nothing until the config turns it

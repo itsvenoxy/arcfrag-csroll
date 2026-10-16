@@ -48,6 +48,13 @@ public partial class CSRoll : IAdminPanelHost
             return;
         }
 
+        // Arcfrag: the Workshop HUD is off, the settings live in ArcfragCore's !admin panel (tab "Random Perk").
+        if (!Config.CustomHud.Enabled && _modeAdmin is not null)
+        {
+            CSRollUtils.PrintTitleToChatColored(Core, sender, "Random Perk settings are in [gold]!admin[default] → tab [gold]Random Perk[default] (or !rollmenu).");
+            return;
+        }
+
         if (_customHud is null)
         {
             CSRollUtils.PrintTitleToChat(Core, sender, "The admin panel isn't available right now - use !rollmenu.");

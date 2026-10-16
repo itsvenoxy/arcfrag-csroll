@@ -2,6 +2,8 @@ using Arcfrag.Core.Contract;
 
 using SwiftlyS2.Shared;
 
+using CSRoll.Config;
+using CSRoll.Hud;
 using CSRoll.Modifiers;
 
 namespace CSRoll.Core;
@@ -83,12 +85,88 @@ public static class ModifierLook
         return ModeHudCategory.Chaos;
     }
 
-    /// <summary>A modifier as the Arcfrag UI HUD shows it: display name, plain description (no chat color tokens), category, tone.</summary>
-    public static ModeHudModifier ToHud(ISwiftlyCore core, GameModifierBase modifier, bool withDescription = true)
+    /// <summary>
+    /// A modifier as the Arcfrag UI HUD shows it: display name, plain description (no chat color tokens), category, tone, and
+    /// for the Random Perk v2 look (contract 0.15.0) the icon key, colour family, rarity tier and short line.
+    /// <paramref name="rarity"/> null or switched off: no tier tag.
+    /// </summary>
+    public static ModeHudModifier ToHud(ISwiftlyCore core, GameModifierBase modifier, bool withDescription = true, RarityConfig? rarity = null)
     {
         var (category, tone) = For(modifier.Name);
         var description = withDescription ? CSRollUtils.PlainTextFromChatColors(CSRollUtils.GetModifierDescription(core, modifier)) : "";
-        return new ModeHudModifier(CSRollUtils.PlainTextFromChatColors(CSRollUtils.GetModifierDisplayName(core, modifier)), description, category, tone);
+        string? shortText;
+        try
+        {
+            shortText = CSRollUtils.PlainTextFromChatColors(CSRollUtils.GetModifierShortDescription(core, modifier));
+        }
+        catch (Exception)
+        {
+            shortText = null;
+        }
+
+        return new ModeHudModifier(CSRollUtils.PlainTextFromChatColors(CSRollUtils.GetModifierDisplayName(core, modifier)), description, category, tone)
+        {
+            Icon = HudCatalog.Icon(modifier),
+            Group = Group(HudCatalog.Category(modifier)),
+            Rarity = rarity is { Enabled: true } ? Rarity(ModifierRarity.Resolve(modifier, rarity)) : ModeHudRarity.None,
+            Short = string.IsNullOrWhiteSpace(shortText) ? null : shortText,
+        };
+    }
+
+    /// <summary>A reel tile for a modifier: icon, colour family, tier (none while rarity is off).</summary>
+    public static ModeHudTile Tile(GameModifierBase modifier, RarityConfig rarity)
+        => new(HudCatalog.Icon(modifier), Group(HudCatalog.Category(modifier)),
+            rarity.Enabled ? Rarity(ModifierRarity.Resolve(modifier, rarity)) : ModeHudRarity.None);
+
+    /// <summary>The upstream HudCatalog category key (move/weap/util/surv/stealth/chaos) as the contract's colour family.</summary>
+    public static ModeHudGroup Group(string category) => category switch
+    {
+        "move" => ModeHudGroup.Move,
+        "weap" => ModeHudGroup.Weap,
+        "util" => ModeHudGroup.Util,
+        "surv" => ModeHudGroup.Surv,
+        "stealth" => ModeHudGroup.Stealth,
+        _ => ModeHudGroup.Chaos,
+    };
+
+    public static ModeHudRarity Rarity(ModifierTier tier) => tier switch
+    {
+        ModifierTier.Restricted => ModeHudRarity.Restricted,
+        ModifierTier.Classified => ModeHudRarity.Classified,
+        ModifierTier.Covert => ModeHudRarity.Covert,
+        ModifierTier.Gold => ModeHudRarity.Gold,
+        _ => ModeHudRarity.MilSpec,
+    };
+
+    /// <summary>Short gauge labels of the list rows (reference rp.js GAUGE); others keep the gauge's own label.</summary>
+    private static readonly Dictionary<string, string> GaugeLabels = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["Jetpack"] = "Fuel",
+        ["Recall"] = "Recall",
+        ["Flanker"] = "Flanker",
+        ["Vanish"] = "Vanish",
+        ["KamikazeChickens"] = "Chickens",
+        ["ButterflyEffect"] = "Next roll",
+        ["WeaponRoulette"] = "Next weapon",
+    };
+
+    /// <summary>Abilities used with the inspect key: the row shows the key box "F".</summary>
+    private static readonly HashSet<string> InspectAbilities = new(StringComparer.OrdinalIgnoreCase) { "Recall", "Flanker", "Vanish", "KamikazeChickens" };
+
+    /// <summary>
+    /// A modifier's live gauge (upstream HudGauge) as the widget drawn inside its list row: short label, "39%" / "2.5s" /
+    /// "READY", the bar, and the key box for inspect abilities.
+    /// </summary>
+    public static ModeHudWidget GaugeWidget(GameModifierBase owner, HudGauge gauge)
+    {
+        var label = GaugeLabels.TryGetValue(owner.Name, out var known) ? known : gauge.Label;
+        var value = gauge.Ready ? "READY" : gauge.Value.Contains(" · ", StringComparison.Ordinal) ? gauge.Value[(gauge.Value.LastIndexOf(" · ", StringComparison.Ordinal) + 3)..] : gauge.Value;
+        var key = InspectAbilities.Contains(owner.Name) ? "F" : null;
+        return new ModeHudWidget(key is null ? ModeHudWidgetKind.Gauge : ModeHudWidgetKind.Ability, label, value.Replace(',', '.'), "",
+            Percent(gauge.Fill), gauge.Ready ? ModeHudState.Ready : ModeHudState.None, key)
+        {
+            Modifier = HudCatalog.Icon(owner),
+        };
     }
 
     /// <summary>"12,4s" style is the center HTML's; the Arcfrag HUD uses "12.4s".</summary>

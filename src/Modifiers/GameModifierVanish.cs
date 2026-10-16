@@ -7,6 +7,7 @@ using SwiftlyS2.Shared.Players;
 using SwiftlyS2.Shared.SchemaDefinitions;
 
 using CSRoll.Core;
+using CSRoll.Hud;
 
 namespace CSRoll.Modifiers;
 
@@ -249,13 +250,6 @@ public sealed class GameModifierVanish : GameModifierInvisibleBase
             return;
         }
 
-        // Stay off the center-HTML surface while the roll's own reveal owns it - see
-        // ModifierRuntime.IsModifierHudSuppressed.
-        if (Runtime.IsModifierHudSuppressed)
-        {
-            return;
-        }
-
         _lastHtmlUpdateTime[slot] = now;
 
         var readyAt = _nextAvailableTime.GetValueOrDefault(slot, now);
@@ -294,6 +288,20 @@ public sealed class GameModifierVanish : GameModifierInvisibleBase
                          "<span class=\"fontWeight-Bold\"> to activate</span>";
             // F is Inspect Weapon's default bind; the real bind can't be read server-side.
             widget = new ModeHudWidget(ModeHudWidgetKind.Ability, HudTitle, "READY", "Press F", 100, ModeHudState.Ready, Key: "F");
+        }
+
+        var gauge = _vanishEndsAt.TryGetValue(slot, out var activeUntil)
+            ? new HudGauge("Vanish", $"Vanished · {Math.Max(0f, activeUntil - now):0.0}s", ratio)
+            : readyAt > now
+                ? new HudGauge("Vanish", $"{readyAt - now:0.0}s", ratio)
+                : new HudGauge("Vanish", "Ready · Inspect", 1f, Ready: true);
+        SetGauge(slot, gauge);
+
+        // The center-HTML block stays off the surface while the roll's own reveal owns it (see
+        // ModifierRuntime.IsModifierHudSuppressed); the gauge above has no such conflict.
+        if (Runtime.IsModifierHudSuppressed)
+        {
+            return;
         }
 
         var html = "<span color=\"gold\" class=\"fontWeight-Bold\">Vanish</span><br/>" +

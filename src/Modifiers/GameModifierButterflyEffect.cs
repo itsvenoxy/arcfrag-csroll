@@ -3,6 +3,7 @@ using SwiftlyS2.Shared.Events;
 using SwiftlyS2.Shared.Players;
 
 using CSRoll.Core;
+using CSRoll.Hud;
 
 namespace CSRoll.Modifiers;
 
@@ -29,6 +30,12 @@ namespace CSRoll.Modifiers;
 /// own incompatibilities keep filtering out candidates that are about to become perfectly legal. The
 /// side effect is that the carrier has no extra modifier for the few seconds the roll is on screen,
 /// which reads correctly - the HUD says "Rolling" for exactly that window.
+///
+/// Bug fix: nothing checked whether the carrier was alive, so a dead player's modifier kept being
+/// thrown away and re-rolled for the rest of the round - rolls, sounds and chat announcements for
+/// someone who wasn't playing. The countdown now pauses at death (a roll already on screen is
+/// abandoned, so nothing lands on a corpse) and resumes with the time it had left if the carrier comes
+/// back mid-round (Revive, a respawn mode). Whatever they were holding when they died stays theirs.
 /// </summary>
 public sealed class GameModifierButterflyEffect : GameModifierBase
 {
@@ -69,6 +76,8 @@ public sealed class GameModifierButterflyEffect : GameModifierBase
     /// <summary>Arcfrag HUD only: the widget reads LANDED for a moment after a roll lands.</summary>
     private readonly Dictionary<int, float> _landedUntil = [];
     private const float LandedDisplaySeconds = 1.5f;
+    /// <summary>Seconds that were left on a carrier's countdown when they died - present exactly while they're dead, and handed back as a fresh deadline when they're alive again.</summary>
+    private readonly Dictionary<int, float> _pausedRemaining = [];
 
     public GameModifierButterflyEffect()
     {
@@ -144,6 +153,7 @@ public sealed class GameModifierButterflyEffect : GameModifierBase
             ReleaseGrant(slot);
             _nextSwapTime.Remove(slot);
             _spins.Remove(slot);
+            _pausedRemaining.Remove(slot);
         }
     }
 
@@ -163,6 +173,7 @@ public sealed class GameModifierButterflyEffect : GameModifierBase
         _nextSwapTime.Clear();
         _spins.Clear();
         _landedUntil.Clear();
+        _pausedRemaining.Clear();
     }
 
     /// <summary>Removes the dictionary entry BEFORE revoking, so the OnSlotsRemoved that revoking may trigger on the granted modifier can't re-enter this and revoke it a second time.</summary>
@@ -182,6 +193,17 @@ public sealed class GameModifierButterflyEffect : GameModifierBase
         foreach (var player in GetAssignedPlayers())
         {
             var slot = player.Slot;
+
+            if (!player.IsAlive)
+            {
+                PauseWhileDead(slot, now);
+                continue;
+            }
+
+            if (_pausedRemaining.Remove(slot, out var remaining))
+            {
+                _nextSwapTime[slot] = now + remaining;
+            }
 
             if (_spins.TryGetValue(slot, out var spin))
             {
@@ -205,6 +227,30 @@ public sealed class GameModifierButterflyEffect : GameModifierBase
         }
     }
 
+    /// <summary>
+    /// Freezes the countdown the first tick a carrier is seen dead. A roll already on screen is
+    /// abandoned rather than landed: its countdown was advanced a full interval when it started, so
+    /// the time saved is what was left until THAT roll would have landed - on coming back, the roll
+    /// simply starts over from the top and lands on the same schedule. The HUD block goes too, so a
+    /// spectating corpse isn't left looking at a frozen timer.
+    /// </summary>
+    private void PauseWhileDead(int slot, float now)
+    {
+        if (_pausedRemaining.ContainsKey(slot))
+        {
+            return;
+        }
+
+        var deadline = _nextSwapTime.GetValueOrDefault(slot, now);
+        if (_spins.Remove(slot))
+        {
+            deadline -= Runtime.Config.ButterflyEffect.SwapIntervalSeconds;
+        }
+
+        _pausedRemaining[slot] = Math.Max(0f, deadline - now);
+        ClearHud(slot);
+    }
+
     private void StartSpin(IPlayer player, float now)
     {
         var slot = player.Slot;
@@ -226,7 +272,8 @@ public sealed class GameModifierButterflyEffect : GameModifierBase
         var spin = new SpinState
         {
             FrameIndex = 0,
-            Target = candidates.Count > 0 ? candidates[Random.Shared.Next(candidates.Count)] : null,
+            // Weighted like a real roll, so a Gold lands here as rarely as it does at round start.
+            Target = ModifierRarity.PickWeighted(candidates, Runtime.Config.Rarity, Random.Shared),
             NextFrameTime = now,
         };
 
@@ -279,6 +326,7 @@ public sealed class GameModifierButterflyEffect : GameModifierBase
         // was advanced to the next cycle when the roll started, so one interval comes back off here to
         // get THIS roll's landing moment, or the timer would jump forward a full interval mid-roll.
         var landingRemaining = Math.Max(0f, _nextSwapTime.GetValueOrDefault(slot, now) - Runtime.Config.ButterflyEffect.SwapIntervalSeconds - now);
+        PublishGauge(slot, flashed, landingRemaining);
         SetHud(slot, BuildStatusHtml(flashed, landingRemaining), HudPriority);
         SetStatus(slot, new ModeHudWidget(ModeHudWidgetKind.Rotor, HudTitle, CSRollUtils.PlainTextFromChatColors(flashed), "", 100, ModeHudState.Spinning,
             Before: RandomName(pool), After: RandomName(pool)), HudPriority);
@@ -304,6 +352,7 @@ public sealed class GameModifierButterflyEffect : GameModifierBase
             : "<none>";
 
         var remaining = Math.Max(0f, _nextSwapTime.GetValueOrDefault(slot, now) - now);
+        PublishGauge(slot, activeName, remaining);
         SetHud(slot, BuildStatusHtml(activeName, remaining), HudPriority);
 
         // Arcfrag HUD widget: the granted modifier with the countdown to the next re-roll, LANDED right after a roll.
@@ -318,6 +367,13 @@ public sealed class GameModifierButterflyEffect : GameModifierBase
 
     private string RandomName(IReadOnlyList<GameModifierBase> pool)
         => pool.Count > 0 ? CSRollUtils.PlainTextFromChatColors(CSRollUtils.GetModifierDisplayName(Core, pool[Random.Shared.Next(pool.Count)])) : "";
+    /// <summary>The custom HUD's readout: what the carrier holds right now (flickering during a roll) and the countdown to the next one.</summary>
+    private void PublishGauge(int slot, string modifierName, float secondsRemaining)
+    {
+        var interval = Math.Max(0.01f, Runtime.Config.ButterflyEffect.SwapIntervalSeconds);
+        var shown = modifierName == "<none>" ? "None" : modifierName;
+        SetGauge(slot, new HudGauge("Butterfly Effect", $"{shown} · {secondsRemaining:0.0}s", 1f - Math.Clamp(secondsRemaining / interval, 0f, 1f)));
+    }
 
     /// <summary>
     /// Two-line HUD - title, then the currently granted modifier with its countdown to the right -
@@ -349,5 +405,6 @@ public sealed class GameModifierButterflyEffect : GameModifierBase
         _nextSwapTime.Remove(@event.PlayerId);
         _spins.Remove(@event.PlayerId);
         _landedUntil.Remove(@event.PlayerId);
+        _pausedRemaining.Remove(@event.PlayerId);
     }
 }

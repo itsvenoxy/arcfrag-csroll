@@ -10,7 +10,7 @@
     <AssemblyName>CSRoll</AssemblyName>
     <OutputPath>$(MSBuildThisFileDirectory)build/</OutputPath>
     <PublishDir>$(OutputPath)publish/CSRoll</PublishDir>
-    <Version>1.37.3-arcfrag.1</Version>
+    <Version>1.43.0-arcfrag.2</Version>
   </PropertyGroup>
 
   <ItemGroup>

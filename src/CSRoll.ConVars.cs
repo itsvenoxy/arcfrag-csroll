@@ -16,8 +16,7 @@ namespace CSRoll;
 ///   csr_rollmode 1/2/3        each player rolls / one set per team / one set for everyone
 ///   csr_minrounds, csr_maxrounds   modifiers per roll
 ///   csr_rarity 0/1            rarity tiers off / on
-///   csr_hud 0/1               custom HUD off / on
-///   csr_hud_mode 0/1          opt-in (!hud) / everyone
+///   (csr_hud / csr_hud_mode removed on Arcfrag: the HUD is always on)
 ///
 /// config.jsonc stays the source of the starting values and nothing is written back to it: a value
 /// set from the console or a .cfg overrides the config, and keeps overriding it through config
@@ -36,8 +35,6 @@ public partial class CSRoll
     private IConVar<int>? _cvMinRounds;
     private IConVar<int>? _cvMaxRounds;
     private IConVar<bool>? _cvRarity;
-    private IConVar<bool>? _cvHud;
-    private IConVar<int>? _cvHudMode;
 
     /// <summary>Convars set from outside (console, .cfg) - re-applied over every config reload.</summary>
     private readonly HashSet<string> _overriddenConVars = new(StringComparer.OrdinalIgnoreCase);
@@ -50,8 +47,7 @@ public partial class CSRoll
         _cvMinRounds = Core.ConVar.CreateOrFind("csr_minrounds", "CSRoll: fewest modifiers per roll.", Runtime.MinRandomRounds, 0, 10, ConvarFlags.NONE);
         _cvMaxRounds = Core.ConVar.CreateOrFind("csr_maxrounds", "CSRoll: most modifiers per roll.", Runtime.MaxRandomRounds, 0, 10, ConvarFlags.NONE);
         _cvRarity = Core.ConVar.CreateOrFind("csr_rarity", "CSRoll: rarity tiers - 0 off (every modifier equally likely), 1 on.", Config.Rarity.Enabled, ConvarFlags.NONE);
-        _cvHud = Core.ConVar.CreateOrFind("csr_hud", "CSRoll: custom HUD - 0 off (centre text for everyone), 1 on.", Config.CustomHud.Enabled, ConvarFlags.NONE);
-        _cvHudMode = Core.ConVar.CreateOrFind("csr_hud_mode", "CSRoll: custom HUD mode - 0 opt-in with !hud, 1 everyone.", HudModeNumber(Config.CustomHud), 0, 1, ConvarFlags.NONE);
+        // Arcfrag: no csr_hud / csr_hud_mode - the HUD is always on and cannot be switched off.
 
         // A load starts from config.jsonc; server.cfg re-applies any overrides on the next map.
         _overriddenConVars.Clear();
@@ -150,23 +146,6 @@ public partial class CSRoll
                 Config.Rarity.Enabled = _cvRarity.Value;
                 return true;
 
-            case "csr_hud" when _cvHud is not null:
-                if (_cvHud.Value == Config.CustomHud.Enabled)
-                {
-                    return false;
-                }
-
-                Config.CustomHud.Enabled = _cvHud.Value;
-                return true;
-
-            case "csr_hud_mode" when _cvHudMode is not null:
-                if (_cvHudMode.Value == HudModeNumber(Config.CustomHud))
-                {
-                    return false;
-                }
-
-                Config.CustomHud.Mode = _cvHudMode.Value == 1 ? "Everyone" : "OptIn";
-                return true;
 
             default:
                 return false;
@@ -210,8 +189,6 @@ public partial class CSRoll
         SetIfDifferent(_cvMinRounds, Runtime.MinRandomRounds);
         SetIfDifferent(_cvMaxRounds, Runtime.MaxRandomRounds);
         SetIfDifferent(_cvRarity, Config.Rarity.Enabled);
-        SetIfDifferent(_cvHud, Config.CustomHud.Enabled);
-        SetIfDifferent(_cvHudMode, HudModeNumber(Config.CustomHud));
     }
 
     private static void SetIfDifferent<T>(IConVar<T>? convar, T value)

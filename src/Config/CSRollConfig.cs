@@ -957,7 +957,9 @@ public class CustomHudConfig
     /// Arcfrag: off. The Random Perk HUD comes from ArcfragCore (IPlatformModeHud → Arcfrag UI addon),
     /// the upstream csroll_hud layout and !hud are not used there.
     /// </summary>
-    public bool Enabled { get; set; } = false;
+    /// Arcfrag (Janis, 2026-10-17): the Random Perk HUD is always on and cannot be switched off. It is the Arcfrag UI,
+    /// so this upstream switch is pinned to false: config.jsonc, csr_hud and the admin panel can no longer change it.
+    public bool Enabled { get => false; set { } }
 
     /// <summary>The layout the HUD entity loads, relative to the game's panorama tree.</summary>
     public string LayoutPath { get; set; } = "panorama/layout/custom_game/csroll_hud.xml";

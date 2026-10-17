@@ -67,8 +67,8 @@ public partial class CSRoll
         _commandGuids.Add(Core.Command.RegisterCommand("memodifier", Debounce("memodifier", OnMeModifier), registerRaw: true, permission: AdminPermission, helpText: "<modifier name> - Apply a modifier scoped to just yourself, without affecting anyone else."));
         _commandGuids.Add(Core.Command.RegisterCommand("rolltestall", Debounce("rolltestall", OnRollTestAll), registerRaw: true, permission: AdminPermission, helpText: "[seconds] - Applies every registered modifier to you one at a time, announcing each on and off, so broken ones can be spotted. Run again to stop."));
         _commandGuids.Add(Core.Command.RegisterCommand("rollhelp", Debounce("rollhelp", OnRollHelp), registerRaw: true, helpText: "Prints every available Random Perk command."));
-        _commandGuids.Add(Core.Command.RegisterCommand("hud", Debounce("hud", OnHud), registerRaw: true, helpText: "Switch between the new CSRoll HUD and the centre-text HUD (needs the HUD addon). Remembered for next time."));
-        _commandGuids.Add(Core.Command.RegisterCommand("hudstatus", Debounce("hudstatus", OnHudStatus), registerRaw: true, permission: AdminPermission, helpText: "Reports whether the custom HUD entity is live and who is using it."));
+        _commandGuids.Add(Core.Command.RegisterCommand("hud", Debounce("hud", OnHud), registerRaw: true, helpText: "The Random Perk HUD is always on (Arcfrag UI)."));
+        _commandGuids.Add(Core.Command.RegisterCommand("hudstatus", Debounce("hudstatus", OnHudStatus), registerRaw: true, permission: AdminPermission, helpText: "Reports whether the Random Perk HUD (Arcfrag UI) is live."));
 
         InitializeMenu();
 
@@ -218,12 +218,15 @@ public partial class CSRoll
             return;
         }
 
-        CSRollUtils.PrintTitleToChat(Core, sender, _customHud?.Toggle(sender) ?? "The custom HUD isn't available.");
+        // Arcfrag: one HUD, always on - nothing to switch.
+        CSRollUtils.PrintTitleToChat(Core, sender, "The Random Perk HUD is always on (Arcfrag UI). If you don't see it, restart CS2 to load the latest Arcfrag UI addon.");
     }
 
     public void OnHudStatus(ICommandContext context)
     {
-        CSRollUtils.PrintTitleToChat(Core, context.Sender, _customHud?.Status(context.Sender) ?? "The custom HUD isn't available.");
+        CSRollUtils.PrintTitleToChat(Core, context.Sender, _modeHud is { Available: true }
+            ? "Random Perk HUD: Arcfrag UI, always on."
+            : "Random Perk HUD: ArcfragCore HUD not available on this server - players see centre text.");
     }
 
     public void OnMeModifier(ICommandContext context)

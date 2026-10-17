@@ -6,6 +6,7 @@ using SwiftlyS2.Shared.Players;
 using SwiftlyS2.Shared.SchemaDefinitions;
 
 using CSRoll.Config;
+using CSRoll.Hud;
 using CSRoll.Modifiers;
 using CSRoll.Services.Interfaces;
 
@@ -43,6 +44,9 @@ public sealed partial class ModifierRuntime
     /// </summary>
     public bool DebugMode { get; set; }
 
+    /// <summary>How random rounds hand out modifiers, read live from config (see CSRollConfig.RollMode).</summary>
+    public ModifierRollMode RollMode => Config.ResolveRollMode();
+
     /// <summary>
     /// Every modifier CSRoll knows how to construct, by name - both classic modifiers and cvar-file
     /// modifiers, keyed on the name each produces. A superset of _registeredModifiers: this also
@@ -62,7 +66,7 @@ public sealed partial class ModifierRuntime
     /// Activate()'d - see the bug-fix note on PlaySpinThenRevealActiveModifiersBanner for why
     /// activation is deferred until each reveal actually lands instead of happening immediately.
     /// Exactly one of _pendingGlobalModifiers/_pendingModifiersByPlayerSlot is populated at a time,
-    /// mirroring the RandomizePlayers on/off branches in ApplyRandomRoundsForRound.
+    /// mirroring the RollMode branches in ApplyRandomRoundsForRound ("Game" vs "Player"/"Team").
     /// </summary>
     private List<GameModifierBase>? _pendingGlobalModifiers;
     private Dictionary<GameModifierBase, List<int>>? _pendingAssignedSlotsByModifier;
@@ -139,6 +143,7 @@ public sealed partial class ModifierRuntime
         _lastModifierHudUpdateTime.Clear();
         _lastModeHudRefreshTime = float.NegativeInfinity;
         _lastModeSpecUpdateTime.Clear();
+        _hudGauges.Clear();
     }
 
     /// <summary>Extends the HUD blackout to at least <paramref name="seconds"/> from now - never shortens an existing one, so overlapping reveals can't cut each other short.</summary>
@@ -180,13 +185,27 @@ public sealed partial class ModifierRuntime
     public IReadOnlyList<GameModifierBase> RegisteredModifiers => _registeredModifiers;
     public IReadOnlyList<GameModifierBase> ActiveModifiers => _activeModifiers;
 
+    /// <summary>Per-player convar overrides the server honours during that player's own simulation as well as on their client - see PlayerConVarOverrides. Shared by every modifier that needs one (BunnyHop, NoRecoil).</summary>
+    public PlayerConVarOverrides ConVarOverrides { get; }
+
+    /// <summary>
+    /// The Panorama HUD, when the plugin has one installed. Every center-HTML surface below (the roll
+    /// spin and reveal, the composed modifier blocks, the spectator panel) checks UsesCustomHud per
+    /// player and stands aside for those who have switched to it, so nobody gets both at once.
+    /// </summary>
+    public CustomHudService? CustomHud { get; set; }
+
+    private bool UsesCustomHud(int slot) => CustomHud?.UsesCustomHud(slot) == true;
+
     public ModifierRuntime(ISwiftlyCore core, CSRollConfig config, ICvarRollbackService cvarService)
     {
         _core = core;
         Config = config;
         _cvarService = cvarService;
+        ConVarOverrides = new PlayerConVarOverrides(core);
         MinRandomRounds = config.MinRandomRounds;
         MaxRandomRounds = config.MaxRandomRounds;
+        ModifierRarity.Logger = core.Logger;
     }
 
     /// <summary>
@@ -333,6 +352,10 @@ public sealed partial class ModifierRuntime
             modifier.Unregister();
         }
 
+        // After every OnDisabled has already removed (and replicated back) its own overrides - this
+        // only drops whatever a misbehaving modifier left behind, and the hooks with it.
+        ConVarOverrides.Clear();
+
         _lastActiveModifiers.Clear();
         _registeredModifiers.Clear();
         _lastSpectatorHudUpdateTime.Clear();
@@ -368,6 +391,7 @@ public sealed partial class ModifierRuntime
         // Slots are recycled by the next player to join, so any HUD blocks published for this one
         // have to go with them or the newcomer inherits a stale panel.
         _hudSections.Remove(@event.PlayerId);
+        _hudGauges.Remove(@event.PlayerId);
         _lastModifierHudUpdateTime.Remove(@event.PlayerId);
         ForgetModeHudSlot(@event.PlayerId);
 
@@ -442,6 +466,12 @@ public sealed partial class ModifierRuntime
                 continue;
             }
 
+            // The custom HUD draws the watched player's modifiers into its own list instead.
+            if (UsesCustomHud(slot))
+            {
+                continue;
+            }
+
             // Bug fix: this was the one persistent HUD missing the suppression gate every modifier
             // HUD has. Refreshing 5x a second by default, it overwrote the roll's own spin and reveal
             // for anyone dead or spectating during freeze time - which is most of the server at round
@@ -490,8 +520,9 @@ public sealed partial class ModifierRuntime
             RemoveAllModifiers();
         }
 
-        CSRollUtils.PrintTitleToChatAll(_core, RandomRoundsEnabled ? "Random rounds enabled for next round!" : "Random rounds disabled!");
-        CSRollUtils.ShowMessageCentreAll(_core, CSRollUtils.BuildRandomRoundsToggleHtml(RandomRoundsEnabled), 4000);
+        // Admins only, like every settings change - players just see the next round roll or not.
+        CSRollUtils.PrintTitleToAdminsOnly(_core, RandomRoundsEnabled ? "Random rounds enabled for next round!" : "Random rounds disabled!");
+        CSRollUtils.ShowMessageCentreAdminsOnly(_core, CSRollUtils.BuildRandomRoundsToggleHtml(RandomRoundsEnabled), 4000);
     }
 
     public void ApplyRandomRoundsForRound(bool showBanner = true)
@@ -507,16 +538,17 @@ public sealed partial class ModifierRuntime
         // Bug fix: this used to also run a supplementary global-only roll every round, originally
         // added so ConditionalInvisibility/Vanish (which used to opt out of per-player
         // randomization, picking their own random target internally instead of using the runtime's
-        // assignment) still got a chance while RandomizePlayers was on. That secondary global roll is
+        // assignment) still got a chance during the per-player roll. That secondary global roll is
         // removed entirely per explicit instruction: no automatic global/shared activation happens
         // alongside the per-player roll anymore. ConditionalInvisibility/Vanish now support
         // per-player randomization directly instead (see their own files), so they lose nothing by
         // this removal - only modifiers that are still genuinely global-only (PlantAnywhere, etc.)
         // are excluded from the automatic rotation now; they're still fully usable via an explicit
         // admin !rolltoggle.
-        if (Config.RandomizePlayers)
+        var mode = RollMode;
+        if (mode != ModifierRollMode.Game)
         {
-            appliedAnything = AssignRandomModifiersPerPlayer(showBanner);
+            appliedAnything = AssignRandomModifiersPerPlayer(showBanner, mode);
         }
         else
         {
@@ -557,8 +589,11 @@ public sealed partial class ModifierRuntime
     /// correct there for a different reason: those activate with an EMPTY AssignedSlots (global/
     /// "everyone"), so a new global modifier genuinely does overlap every existing active modifier's
     /// slots, whoever they belong to.
+    ///
+    /// RollMode "Team" uses the same slot-based path with one set per team instead of one per player -
+    /// see PickRandomModifiersForTeams.
     /// </summary>
-    public bool AssignRandomModifiersPerPlayer(bool showBanner = true)
+    public bool AssignRandomModifiersPerPlayer(bool showBanner = true, ModifierRollMode mode = ModifierRollMode.Player)
     {
         var pool = _registeredModifiers.Where(m => m.SupportsPerPlayerRandomization).ToList();
         // Bug fix: GetAllValidPlayers() includes spectators, so a spectator could get assigned (and
@@ -574,10 +609,13 @@ public sealed partial class ModifierRuntime
         var random = new Random();
         var assignedSlotsByModifier = new Dictionary<GameModifierBase, List<int>>();
         var modifiersByPlayerSlot = new Dictionary<int, List<GameModifierBase>>();
+        var teamPicks = mode == ModifierRollMode.Team ? PickRandomModifiersForTeams(pool, random) : null;
 
         foreach (var player in players)
         {
-            var picked = PickRandomModifiersForPlayer(pool, random, player);
+            var picked = teamPicks is null
+                ? PickRandomModifiersForPlayer(pool, random, player)
+                : player.Controller is { IsValid: true } controller && teamPicks.TryGetValue(controller.Team, out var teamSet) ? [.. teamSet] : [];
             if (picked.Count == 0)
             {
                 continue;
@@ -612,8 +650,9 @@ public sealed partial class ModifierRuntime
         // crash in the window between the roll and the reveal would otherwise leave nothing at all
         // naming the modifiers that were in flight. This line closes that gap.
         _core.Logger.LogInformation(
-            "[CSRoll] ROLLED (per-player): {Roll}",
-            string.Join(" | ", modifiersByPlayerSlot.Select(entry => $"slot {entry.Key}: {string.Join(", ", entry.Value.Select(m => m.Name))}")));
+            "[CSRoll] ROLLED (per-{Mode}): {Roll}",
+            mode == ModifierRollMode.Team ? "team" : "player",
+            string.Join(" | ", modifiersByPlayerSlot.Select(entry => $"slot {entry.Key}: {string.Join(", ", entry.Value.Select(LogName))}")));
 
         if (DebugMode)
         {
@@ -625,7 +664,7 @@ public sealed partial class ModifierRuntime
             // there watching the server die, so it has to be visible to whoever is testing.
             // DebugMode is off by default and is an explicit opt-in via !rolldebug, so broadcasting
             // while it is on costs a normal match nothing.
-            CSRollUtils.PrintTitleToChatAll(_core, "Rolled modifiers (randomized per player):");
+            CSRollUtils.PrintTitleToChatAll(_core, mode == ModifierRollMode.Team ? "Rolled modifiers (one set per team):" : "Rolled modifiers (randomized per player):");
             foreach (var (slot, modifiers) in modifiersByPlayerSlot)
             {
                 var player = _core.PlayerManager.GetPlayer(slot);
@@ -703,9 +742,26 @@ public sealed partial class ModifierRuntime
             // Bug fix: the description was sent raw while only the display name went through
             // Helper.Colored(), so any "[green]"/"[default]" token inside a description printed as
             // literal text in chat instead of coloring it.
-            player.SendChat(SwiftlyS2.Shared.Helper.Colored($"• {CSRollUtils.GetModifierDisplayName(_core, modifier)} - {CSRollUtils.GetModifierDescription(_core, modifier)}"));
+            player.SendChat(SwiftlyS2.Shared.Helper.Colored($"• {ChatName(modifier)} - {CSRollUtils.GetModifierDescription(_core, modifier, player.Slot)}"));
         }
     }
+
+    /// <summary>A modifier's name for chat: in its tier's colour with the tier after it, or plain when rarity is off.</summary>
+    private string ChatName(GameModifierBase modifier)
+    {
+        var name = CSRollUtils.GetModifierDisplayName(_core, modifier);
+        if (!Config.Rarity.Enabled)
+        {
+            return name;
+        }
+
+        var tier = ModifierRarity.Resolve(modifier, Config.Rarity);
+        return $"{ModifierRarity.ChatToken(tier)}{name} ({ModifierRarity.Label(tier)})[default]";
+    }
+
+    /// <summary>A modifier's name for the ROLLED log lines, with its tier when rarity is on.</summary>
+    private string LogName(GameModifierBase modifier) =>
+        Config.Rarity.Enabled ? $"{modifier.Name} [{ModifierRarity.Resolve(modifier, Config.Rarity)}]" : modifier.Name;
 
     /// <summary>Modifiers listed in Config.RequiresMultiplePlayersPerTeam (e.g. Saint) are excluded unless the relevant team has at least 2 players - no point rolling a "revive a dead teammate" modifier in a 1v1 where there's never a teammate to revive.</summary>
     private bool MeetsTeamSizeRequirement(GameModifierBase modifier, int teamSize)
@@ -723,6 +779,49 @@ public sealed partial class ModifierRuntime
 
         return _lastRoundAssignedPerPlayer.TryGetValue((player.SessionId, modifier.Name), out var lastRound) &&
             _roundNumber - lastRound < Config.PerPlayerRepeatCooldownRounds;
+    }
+
+    /// <summary>
+    /// RollMode "Team": one set per team, which every teammate then gets - so a team shares one
+    /// activation, and with it one rolled chance. Both teams get the same number of modifiers, and
+    /// never the same modifier: a shared instance would also share its rolled chance across teams.
+    /// A modifier is skipped while any teammate is on PerPlayerRepeatCooldownRounds for it, unless
+    /// that leaves too few to choose from.
+    /// </summary>
+    private Dictionary<Team, List<GameModifierBase>> PickRandomModifiersForTeams(List<GameModifierBase> pool, Random random)
+    {
+        var count = RollRandomRoundCount(random);
+        var picks = new Dictionary<Team, List<GameModifierBase>>();
+        if (count <= 0)
+        {
+            return picks;
+        }
+
+        var taken = new HashSet<GameModifierBase>();
+
+        // Random order, so neither team always gets first choice of the pool.
+        foreach (var team in random.Next(2) == 0 ? new[] { Team.T, Team.CT } : [Team.CT, Team.T])
+        {
+            var members = _core.PlayerManager.GetInTeam(team).ToList();
+            if (members.Count == 0)
+            {
+                continue;
+            }
+
+            var eligible = pool.Where(m => !taken.Contains(m) && MeetsTeamSizeRequirement(m, members.Count)).ToList();
+            var fresh = eligible.Where(m => !members.Any(member => IsOnPlayerCooldown(member, m))).ToList();
+
+            var picked = PickCompatibleRandomModifiers(fresh, count, random);
+            if (picked.Count < count)
+            {
+                picked = PickCompatibleRandomModifiers(eligible, count, random);
+            }
+
+            picks[team] = picked;
+            taken.UnionWith(picked);
+        }
+
+        return picks;
     }
 
     private List<GameModifierBase> PickRandomModifiersForPlayer(List<GameModifierBase> pool, Random random, IPlayer player)
@@ -755,12 +854,29 @@ public sealed partial class ModifierRuntime
     /// Fix: shuffle first (so every modifier gets an equal starting chance), then greedily walk the
     /// shuffled order and only skip a candidate if it conflicts with something ALREADY picked - a far
     /// rarer event than "conflicts with anything anywhere in the whole pool".
+    ///
+    /// With rarity on, each pick is weighted instead: drop whatever conflicts with the picks so far,
+    /// then ModifierRarity.PickWeighted from what's left. Weighting per pick, rather than one weighted
+    /// order up front, keeps every tier at its configured share on the second and third pick too.
     /// </summary>
-    private static List<GameModifierBase> PickCompatibleRandomModifiers(List<GameModifierBase> eligiblePool, int count, Random random)
+    private List<GameModifierBase> PickCompatibleRandomModifiers(List<GameModifierBase> eligiblePool, int count, Random random)
     {
         if (count <= 0 || eligiblePool.Count == 0)
         {
             return [];
+        }
+
+        if (Config.Rarity.Enabled)
+        {
+            var weighted = new List<GameModifierBase>();
+            var remaining = new List<GameModifierBase>(eligiblePool);
+            while (weighted.Count < count && ModifierRarity.PickWeighted(remaining, Config.Rarity, random) is { } pick)
+            {
+                weighted.Add(pick);
+                remaining.RemoveAll(m => m == pick || m.CheckIfIncompatible(pick) || pick.CheckIfIncompatible(m));
+            }
+
+            return weighted;
         }
 
         var shuffled = new List<GameModifierBase>(eligiblePool);
@@ -804,7 +920,7 @@ public sealed partial class ModifierRuntime
                 continue;
             }
 
-            _core.PlayerManager.GetPlayer(slot)?.SendCenterHTML(CSRollUtils.BuildActivatingModifiersHtml(_core, modifiers, Config.SpinReveal), 6000);
+            _core.PlayerManager.GetPlayer(slot)?.SendCenterHTML(CSRollUtils.BuildActivatingModifiersHtml(_core, modifiers, Config.SpinReveal, rarity: Config.Rarity), 6000);
         }
     }
 
@@ -928,7 +1044,7 @@ public sealed partial class ModifierRuntime
                 }
                 else
                 {
-                    player.SendCenterHTML(CSRollUtils.BuildActivatingModifiersHtml(_core, [modifier], Config.SpinReveal), 6000);
+                    player.SendCenterHTML(CSRollUtils.BuildActivatingModifiersHtml(_core, [modifier], Config.SpinReveal, rarity: Config.Rarity), 6000);
                 }
             }
         }
@@ -1010,7 +1126,7 @@ public sealed partial class ModifierRuntime
         sections.TryGetValue(owner, out var section) &&
         _core.Engine.GlobalVars.CurrentTime < section.ExpiresAt;
 
-    /// <summary>Retracts one modifier's block for one player - e.g. Vanish's own HUD while the player is dead.</summary>
+    /// <summary>Retracts one modifier's block for one player - e.g. Vanish's own HUD while the player is dead. Its custom HUD gauge goes with it.</summary>
     public void ClearHudSection(GameModifierBase owner, int slot)
     {
         if (_hudSections.TryGetValue(slot, out var sections) && sections.Remove(owner) && sections.Count == 0)
@@ -1019,15 +1135,57 @@ public sealed partial class ModifierRuntime
         }
 
         ClearStatusSection(owner, slot);
+
+        if (_hudGauges.TryGetValue(slot, out var gauges) && gauges.Remove(owner) && gauges.Count == 0)
+        {
+            _hudGauges.Remove(slot);
+        }
     }
 
     /// <summary>Retracts every block a modifier owns, for every player. Called automatically from GameModifierBase.Deactivate so no modifier can leave a stale block on screen after it ends.</summary>
     public void ClearHudSections(GameModifierBase owner)
     {
-        foreach (var slot in _hudSections.Keys.Union(_statusSections.Keys).ToList())
+        foreach (var slot in _hudSections.Keys.Union(_statusSections.Keys).Union(_hudGauges.Keys).ToList())
         {
             ClearHudSection(owner, slot);
         }
+    }
+
+    /// <summary>A gauge not republished within this long is treated as gone - the same expiry idea as HudSectionTtlSeconds, so a modifier that stops publishing (its player died, it was revoked) can't leave a frozen bar behind.</summary>
+    private const float HudGaugeTtlSeconds = 0.75f;
+
+    private readonly Dictionary<int, Dictionary<GameModifierBase, (HudGauge Gauge, float ExpiresAt)>> _hudGauges = [];
+
+    /// <summary>Publishes (or replaces) one modifier's custom HUD gauge for one player. See GameModifierBase.SetGauge.</summary>
+    public void SetHudGauge(GameModifierBase owner, int slot, HudGauge gauge)
+    {
+        if (!_hudGauges.TryGetValue(slot, out var gauges))
+        {
+            gauges = [];
+            _hudGauges[slot] = gauges;
+        }
+
+        gauges[owner] = (gauge, _core.Engine.GlobalVars.CurrentTime + HudGaugeTtlSeconds);
+    }
+
+    /// <summary>
+    /// The live gauges for one player, in activation order so the strip doesn't reshuffle between
+    /// refreshes. Expired entries are skipped - and the map-clock guard used throughout this file
+    /// treats an expiry further out than the TTL as stale from a previous map.
+    /// </summary>
+    public IReadOnlyList<(GameModifierBase Owner, HudGauge Gauge)> GetHudGauges(int slot)
+    {
+        if (!_hudGauges.TryGetValue(slot, out var gauges) || gauges.Count == 0)
+        {
+            return [];
+        }
+
+        var now = _core.Engine.GlobalVars.CurrentTime;
+        return gauges
+            .Where(entry => now < entry.Value.ExpiresAt && now + HudGaugeTtlSeconds >= entry.Value.ExpiresAt)
+            .OrderBy(entry => _activeModifiers.IndexOf(entry.Key) is var index and >= 0 ? index : int.MaxValue)
+            .Select(entry => (entry.Key, entry.Value.Gauge))
+            .ToList();
     }
 
     /// <summary>
@@ -1089,6 +1247,12 @@ public sealed partial class ModifierRuntime
 
             var player = _core.PlayerManager.GetAllValidPlayers().FirstOrDefault(p => p.Slot == slot);
             if (player is not { IsValid: true })
+            {
+                continue;
+            }
+
+            // Their gauges are on the custom HUD's strip instead - see GameModifierBase.SetGauge.
+            if (UsesCustomHud(slot))
             {
                 continue;
             }
@@ -1298,6 +1462,9 @@ public sealed partial class ModifierRuntime
     public IEnumerable<GameModifierBase> GetAllKnownModifiers() =>
         _allModifierFactories.Select(kv => GetRegisteredModifierByName(kv.Key) ?? kv.Value());
 
+    /// <summary>The name of every modifier CSRoll can construct, registered or not - fixed after Initialise.</summary>
+    public IReadOnlyCollection<string> KnownModifierNames => _allModifierFactories.Keys;
+
     public void RemoveModifierByName(string modifierName, out string message)
     {
         if (_activeModifiers.Count == 0)
@@ -1424,7 +1591,7 @@ public sealed partial class ModifierRuntime
         // showed up as having received them in the debug output because there simply wasn't any.
         // See the per-player twin above - unconditional console record of the selection, written
         // before activation, covering the gap between the roll and the deferred reveal.
-        _core.Logger.LogInformation("[CSRoll] ROLLED (global): {Roll}", string.Join(", ", addedModifiers.Select(m => m.Name)));
+        _core.Logger.LogInformation("[CSRoll] ROLLED (global): {Roll}", string.Join(", ", addedModifiers.Select(LogName)));
 
         if (DebugMode)
         {
@@ -1475,7 +1642,7 @@ public sealed partial class ModifierRuntime
             }
             else
             {
-                CSRollUtils.ShowMessageCentreAll(_core, CSRollUtils.BuildActivatingModifiersHtml(_core, modifiers, Config.SpinReveal), 6000);
+                CSRollUtils.ShowMessageCentreAll(_core, CSRollUtils.BuildActivatingModifiersHtml(_core, modifiers, Config.SpinReveal, rarity: Config.Rarity), 6000);
             }
         }
 
@@ -1548,38 +1715,37 @@ public sealed partial class ModifierRuntime
         // Bug fix: any active modifier with an EMPTY AssignedSlots is global in scope (e.g. an admin
         // !rolltoggle on something that doesn't support per-player randomization like
         // PlantAnywhere) - live testing confirmed these were taking effect completely
-        // silently under RandomizePlayers=true: no chat, no spin, not even in the !rolldebug listing,
+        // silently in the per-player roll mode: no chat, no spin, not even in the !rolldebug listing,
         // since the per-player branch below only ever iterates each modifier's AssignedSlots, which
         // contributes nothing for a global-scope one. These now always get their own broadcast
-        // reveal, regardless of RandomizePlayers.
+        // reveal, whatever the roll mode.
         var globalModifiers = _activeModifiers.Where(m => m.AssignedSlots.Count == 0).ToList();
         if (globalModifiers.Count > 0)
         {
             RevealGlobalModifiers(globalModifiers, commitOnReveal: false);
         }
 
-        if (Config.RandomizePlayers)
+        // Slot-scoped modifiers get each owner's own reveal, whatever the roll mode - in "Game" mode
+        // these can only come from an admin (!memodifier), and used to go unrevealed.
+        var modifiersByPlayerSlot = new Dictionary<int, List<GameModifierBase>>();
+        foreach (var modifier in _activeModifiers)
         {
-            var modifiersByPlayerSlot = new Dictionary<int, List<GameModifierBase>>();
-            foreach (var modifier in _activeModifiers)
+            foreach (var slot in modifier.AssignedSlots)
             {
-                foreach (var slot in modifier.AssignedSlots)
+                if (!modifiersByPlayerSlot.TryGetValue(slot, out var modifiers))
                 {
-                    if (!modifiersByPlayerSlot.TryGetValue(slot, out var modifiers))
-                    {
-                        modifiers = [];
-                        modifiersByPlayerSlot[slot] = modifiers;
-                    }
-
-                    modifiers.Add(modifier);
+                    modifiers = [];
+                    modifiersByPlayerSlot[slot] = modifiers;
                 }
-            }
 
-            RevealPerPlayerModifiers(modifiersByPlayerSlot, assignedSlotsByModifier: null);
+                modifiers.Add(modifier);
+            }
         }
 
-        // Non-RandomizePlayers mode: everything is already global in scope, so globalModifiers above
-        // already covers the whole active set - nothing further to reveal here.
+        if (modifiersByPlayerSlot.Count > 0)
+        {
+            RevealPerPlayerModifiers(modifiersByPlayerSlot, assignedSlotsByModifier: null);
+        }
     }
 
     /// <summary>Broadcast reveal for a global-scope set of modifiers. When commitOnReveal is true (a deferred round-start roll), activation happens at the exact moment the reveal lands rather than beforehand.</summary>
@@ -1632,10 +1798,20 @@ public sealed partial class ModifierRuntime
         }
         else if (Config.ShowCentreMsg)
         {
+            // Custom HUD players get the carousel; the broadcast below skips them. The commit still
+            // happens once, from the broadcast chain's own Reveal, which runs on the same schedule.
+            foreach (var player in _core.PlayerManager.GetAllValidPlayers())
+            {
+                if (UsesCustomHud(player.Slot))
+                {
+                    CustomHud!.PlayRoll(player.Slot, modifiers, onLanded: null);
+                }
+            }
+
             PlaySpinThenRevealAll(
-                () => CSRollUtils.BuildActivatingModifiersHtml(_core, modifiers, Config.SpinReveal),
+                () => CSRollUtils.BuildActivatingModifiersHtml(_core, modifiers, Config.SpinReveal, rarity: Config.Rarity),
                 Reveal,
-                progress => CSRollUtils.BuildActivatingModifiersHtml(_core, modifiers, Config.SpinReveal, progress));
+                progress => CSRollUtils.BuildActivatingModifiersHtml(_core, modifiers, Config.SpinReveal, progress, Config.Rarity));
         }
         else
         {
@@ -1699,19 +1875,37 @@ public sealed partial class ModifierRuntime
             {
                 PlayModeRoll(slot, modifiers, Reveal);
             }
+            else if (Config.ShowCentreMsg && UsesCustomHud(slot))
+            {
+                // The carousel lands on the same moment the center-HTML spin would, and commits
+                // through the same Reveal callback, so activation timing doesn't depend on which HUD
+                // a player uses.
+                CustomHud!.PlayRoll(slot, modifiers, Reveal);
+            }
             else if (Config.ShowCentreMsg)
             {
                 PlaySpinThenReveal(
                     slot,
-                    () => CSRollUtils.BuildActivatingModifiersHtml(_core, modifiers, Config.SpinReveal),
+                    () => CSRollUtils.BuildActivatingModifiersHtml(_core, modifiers, Config.SpinReveal, rarity: Config.Rarity),
                     Reveal,
-                    progress => CSRollUtils.BuildActivatingModifiersHtml(_core, modifiers, Config.SpinReveal, progress));
+                    progress => CSRollUtils.BuildActivatingModifiersHtml(_core, modifiers, Config.SpinReveal, progress, Config.Rarity));
             }
             else
             {
                 Reveal();
             }
         }
+    }
+
+    /// <summary>
+    /// One flicker of the classic spin: a random modifier name in its tier's colour, picked with the same
+    /// weights as the real roll so Gold names flash past about as rarely as they land.
+    /// </summary>
+    private string BuildRandomSpinFrame()
+    {
+        var modifier = ModifierRarity.PickWeighted(_registeredModifiers, Config.Rarity, Random.Shared)!;
+        var colour = Config.Rarity.Enabled ? ModifierRarity.Hex(ModifierRarity.Resolve(modifier, Config.Rarity)) : "gold";
+        return CSRollUtils.BuildSpinFrameHtml(CSRollUtils.GetModifierDisplayName(_core, modifier), colour);
     }
 
     /// <summary>
@@ -1790,9 +1984,8 @@ public sealed partial class ModifierRuntime
             return;
         }
 
-        var randomName = CSRollUtils.GetModifierDisplayName(_core, _registeredModifiers[Random.Shared.Next(_registeredModifiers.Count)]);
         var interval = GetSpinFrameIntervalSeconds(frameIndex, totalFrames);
-        current.SendCenterHTML(CSRollUtils.BuildSpinFrameHtml(randomName), (int)(interval * 1000) + 50);
+        current.SendCenterHTML(BuildRandomSpinFrame(), (int)(interval * 1000) + 50);
         CSRollUtils.PlaySoundToPlayer(current, Config.SpinReveal.TickSoundEventName, Config.SpinReveal.TickSoundVolume);
 
         _core.Scheduler.DelayBySeconds(interval, () => PlayNextSpinFrame(slot, frameIndex + 1, totalFrames, buildFinalHtml, onRevealed, buildDescriptionFrame));
@@ -1846,7 +2039,7 @@ public sealed partial class ModifierRuntime
         _core.Scheduler.DelayBySeconds(interval, () => PlayDescriptionScrambleFrame(slot, frameIndex + 1, totalFrames, buildDescriptionFrame, buildFinalHtml));
     }
 
-    /// <summary>Broadcast counterpart to PlaySpinThenReveal, used for the shared/global (non-RandomizePlayers) activation path where every player sees the same spin land on the same result.</summary>
+    /// <summary>Broadcast counterpart to PlaySpinThenReveal, used for the shared/global (RollMode "Game") activation path where every player sees the same spin land on the same result.</summary>
     private void PlaySpinThenRevealAll(Func<string> buildFinalHtml, Action onRevealed, Func<float, string>? buildDescriptionFrame = null)
     {
         // Claim the center-HTML surface for the whole animation plus the reveal it lands on, so
@@ -1858,7 +2051,7 @@ public sealed partial class ModifierRuntime
             // Re-armed at the exact moment the finished reveal goes up, so modifier HUDs
             // return precisely when it disappears rather than on the up-front estimate.
             SuppressModifierHudFor(RevealHoldMs() / 1000f);
-            CSRollUtils.ShowMessageCentreAll(_core, buildFinalHtml(), RevealHoldMs());
+            ShowCentreToClassicHud(buildFinalHtml(), RevealHoldMs());
             onRevealed();
             return;
         }
@@ -1882,7 +2075,7 @@ public sealed partial class ModifierRuntime
                 // Re-armed at the exact moment the finished reveal goes up, so modifier HUDs
                 // return precisely when it disappears rather than on the up-front estimate.
                 SuppressModifierHudFor(RevealHoldMs() / 1000f);
-                CSRollUtils.ShowMessageCentreAll(_core, buildFinalHtml(), RevealHoldMs());
+                ShowCentreToClassicHud(buildFinalHtml(), RevealHoldMs());
             }
 
             return;
@@ -1895,10 +2088,9 @@ public sealed partial class ModifierRuntime
             return;
         }
 
-        var randomName = CSRollUtils.GetModifierDisplayName(_core, _registeredModifiers[Random.Shared.Next(_registeredModifiers.Count)]);
         var interval = GetSpinFrameIntervalSeconds(frameIndex, totalFrames);
-        CSRollUtils.ShowMessageCentreAll(_core, CSRollUtils.BuildSpinFrameHtml(randomName), (int)(interval * 1000) + 50);
-        CSRollUtils.PlaySoundToAll(Config.SpinReveal.TickSoundEventName, Config.SpinReveal.TickSoundVolume);
+        ShowCentreToClassicHud(BuildRandomSpinFrame(), (int)(interval * 1000) + 50);
+        PlaySoundToClassicHud(Config.SpinReveal.TickSoundEventName, Config.SpinReveal.TickSoundVolume);
 
         _core.Scheduler.DelayBySeconds(interval, () => PlayNextSpinFrameAll(frameIndex + 1, totalFrames, buildFinalHtml, onRevealed, buildDescriptionFrame));
     }
@@ -1911,13 +2103,37 @@ public sealed partial class ModifierRuntime
             // Re-armed at the exact moment the finished reveal goes up, so modifier HUDs
             // return precisely when it disappears rather than on the up-front estimate.
             SuppressModifierHudFor(RevealHoldMs() / 1000f);
-            CSRollUtils.ShowMessageCentreAll(_core, buildFinalHtml(), RevealHoldMs());
+            ShowCentreToClassicHud(buildFinalHtml(), RevealHoldMs());
             return;
         }
 
         var interval = Config.SpinReveal.DescriptionScrambleDurationSeconds / totalFrames;
-        CSRollUtils.ShowMessageCentreAll(_core, buildDescriptionFrame((float)frameIndex / totalFrames), (int)(interval * 1000) + Config.SpinReveal.DescriptionHoldMs);
+        ShowCentreToClassicHud(buildDescriptionFrame((float)frameIndex / totalFrames), (int)(interval * 1000) + Config.SpinReveal.DescriptionHoldMs);
 
         _core.Scheduler.DelayBySeconds(interval, () => PlayDescriptionScrambleFrameAll(frameIndex + 1, totalFrames, buildDescriptionFrame, buildFinalHtml));
+    }
+
+    /// <summary>The broadcast roll's center-HTML, sent only to players still on the classic HUD - custom HUD players are watching their carousel.</summary>
+    private void ShowCentreToClassicHud(string html, int durationMs)
+    {
+        foreach (var player in _core.PlayerManager.GetAllValidPlayers())
+        {
+            if (!UsesCustomHud(player.Slot))
+            {
+                player.SendCenterHTML(html, durationMs);
+            }
+        }
+    }
+
+    /// <summary>The broadcast roll's tick, for classic HUD players only - the carousel times its own ticks to its tiles.</summary>
+    private void PlaySoundToClassicHud(string soundName, float volume)
+    {
+        foreach (var player in _core.PlayerManager.GetAllValidPlayers())
+        {
+            if (!UsesCustomHud(player.Slot))
+            {
+                CSRollUtils.PlaySoundToPlayer(player, soundName, volume);
+            }
+        }
     }
 }

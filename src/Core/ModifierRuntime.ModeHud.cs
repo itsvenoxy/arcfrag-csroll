@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using SwiftlyS2.Shared.Players;
 using SwiftlyS2.Shared.SchemaDefinitions;
 
+using CSRoll.Config;
 using CSRoll.Modifiers;
 
 namespace CSRoll.Core;
@@ -57,8 +58,28 @@ public sealed partial class ModifierRuntime
     /// <summary>How often the modifier bars are recomposed - ArcfragCore only sends what changed, so this is cheap.</summary>
     private const float ModeHudRefreshIntervalSeconds = 0.1f;
 
-    /// <summary>When the reel of the Arcfrag roll reveal lands on the winner - activation is committed then, as it is when the center-HTML spin lands.</summary>
+    /// <summary>When the reel of the 0.14 slot reveal lands on the winner - activation is committed then, as it is when the center-HTML spin lands.</summary>
     private const float ModeRollLandSeconds = 1.55f;
+
+    /// <summary>Tiles of the Random Perk v2 reel and the one it lands on (reference rp.js: 40 tiles, win at 34).</summary>
+    private const int ModeReelTiles = 40;
+    private const int ModeReelWin = 34;
+
+    /// <summary>When ArcfragCore's tile reel lands (contract 0.15.0); the 0.14 slot reel's time when it can't say.</summary>
+    private float ModeRollLand
+    {
+        get
+        {
+            try
+            {
+                return (float)Math.Clamp(_modeHud?.RollLandSeconds ?? ModeRollLandSeconds, 0.5, 10.0);
+            }
+            catch (Exception)
+            {
+                return ModeRollLandSeconds;
+            }
+        }
+    }
 
     private sealed record StatusSection(ModeHudWidget Widget, int Priority, float ExpiresAt);
 
@@ -130,10 +151,22 @@ public sealed partial class ModifierRuntime
 
         try
         {
-            var cards = modifiers.Take(3).Select(m => ModifierLook.ToHud(_core, m)).ToList();
+            var cards = modifiers.Take(3).Select(m => ModifierLook.ToHud(_core, m, rarity: Config.Rarity)).ToList();
             var reel = _registeredModifiers.Select(m => CSRollUtils.PlainTextFromChatColors(CSRollUtils.GetModifierDisplayName(_core, m))).ToList();
             var round = _core.EntitySystem.GetGameRules() is { } rules ? rules.TotalRoundsPlayed + 1 : 0;
-            _modeHud!.ShowRoll(slot, new ModeHudRoll(round, cards, late, reel));
+            _modeHud!.ShowRoll(slot, new ModeHudRoll(round, cards, late, reel)
+            {
+                Tiles = BuildModeReel(modifiers.First()),
+                WinIndex = ModeReelWin,
+                Header = late ? "Random Perk · New modifier" : round > 0 ? $"Random Perk · Round {round}" : "Random Perk",
+                Foot = RollMode switch
+                {
+                    ModifierRollMode.Game => "Everyone got the same · **!rollactive** lists all",
+                    ModifierRollMode.Team => "Your team shares this roll · **!rollactive** lists all",
+                    _ => late ? "Joined mid-round · **!rollactive** lists all" : "Everyone rolls at round start · **!rollactive** lists all",
+                },
+                FootRight = "!arc → Info → This match",
+            });
         }
         catch (Exception error)
         {
@@ -148,7 +181,24 @@ public sealed partial class ModifierRuntime
     private void PlayModeRoll(int slot, IReadOnlyCollection<GameModifierBase> modifiers, Action onRevealed)
     {
         ShowModeRoll(slot, modifiers, late: false);
-        _core.Scheduler.DelayBySeconds(ModeRollLandSeconds, onRevealed);
+        _core.Scheduler.DelayBySeconds(ModeRollLand, onRevealed);
+    }
+
+    /// <summary>
+    /// The reel strip: fillers drawn like a real pick (tier by weight, then a modifier in it) so Gold tiles flash past about
+    /// as rarely as they land; the tile at <see cref="ModeReelWin"/> is the winner (ArcfragCore swaps in each further card).
+    /// </summary>
+    private IReadOnlyList<ModeHudTile> BuildModeReel(GameModifierBase winner)
+    {
+        var pool = _registeredModifiers.Count > 0 ? _registeredModifiers : [winner];
+        var tiles = new ModeHudTile[ModeReelTiles];
+        for (var i = 0; i < tiles.Length; i++)
+        {
+            var modifier = i == ModeReelWin ? winner : ModifierRarity.PickWeighted(pool, Config.Rarity, Random.Shared) ?? winner;
+            tiles[i] = ModifierLook.Tile(modifier, Config.Rarity);
+        }
+
+        return tiles;
     }
 
     /// <summary>Broadcast twin of <see cref="PlayModeRoll"/> for the global (non-RandomizePlayers) roll.</summary>
@@ -159,7 +209,7 @@ public sealed partial class ModifierRuntime
             ShowModeRoll(player.Slot, modifiers, late: false);
         }
 
-        _core.Scheduler.DelayBySeconds(ModeRollLandSeconds, onRevealed);
+        _core.Scheduler.DelayBySeconds(ModeRollLand, onRevealed);
     }
 
     /// <summary>
@@ -252,8 +302,13 @@ public sealed partial class ModifierRuntime
             return null;
         }
 
-        // The chip needs no descriptions; skipping them keeps the 10 Hz pass free of translation lookups.
-        return new ModeHudBar(modifiers.Select(m => ModifierLook.ToHud(_core, m, withDescription: false)).ToList(), widgets);
+        // The list needs the short lines but no descriptions. Its gauges sit inside the rows (one per modifier); the
+        // older widgets stay for an ArcfragCore that still draws the 0.14 bar.
+        var gauges = GetHudGauges(player.Slot).Select(entry => ModifierLook.GaugeWidget(entry.Owner, entry.Gauge));
+        return new ModeHudBar(modifiers.Select(m => ModifierLook.ToHud(_core, m, withDescription: false, rarity: Config.Rarity)).ToList(), [.. gauges, .. widgets])
+        {
+            Offset = Math.Clamp(Config.CustomHud.ListOffset, 0, 4),
+        };
     }
 
     /// <summary>
@@ -290,20 +345,40 @@ public sealed partial class ModifierRuntime
             _lastModeSpecUpdateTime[slot] = now;
 
             var (targetPlayer, controller) = target.Value;
-            var modifiers = GetModifiersForSlot(targetPlayer.Slot).Take(3).Select(m => ModifierLook.ToHud(_core, m)).ToList();
-            var team = controller.Team switch
-            {
-                SwiftlyS2.Shared.Players.Team.T => "T",
-                SwiftlyS2.Shared.Players.Team.CT => "CT",
-                _ => "",
-            };
+            var modifiers = GetModifiersForSlot(targetPlayer.Slot).Take(5).Select(m => ModifierLook.ToHud(_core, m, rarity: Config.Rarity)).ToList();
             var health = targetPlayer.PlayerPawn is { IsValid: true } pawn ? pawn.Health : 0;
-            var meta = string.Join(" · ", new[] { team, $"{Math.Max(0, health)} HP" }.Where(part => part.Length > 0));
+            var meta = string.Join(" · ", new[] { $"{Math.Max(0, health)} HP", KillsText(controller), TeamText(controller) }.Where(part => part.Length > 0));
+            var gauges = GetHudGauges(targetPlayer.Slot).Select(entry => ModifierLook.GaugeWidget(entry.Owner, entry.Gauge)).ToList();
 
-            if (TrySetSpectator(slot, new ModeHudSpectator(controller.PlayerName, meta, modifiers)))
+            if (TrySetSpectator(slot, new ModeHudSpectator(controller.PlayerName, meta, modifiers)
+                {
+                    Widgets = gauges,
+                    Offset = Math.Clamp(Config.CustomHud.ListOffset, 0, 4),
+                }))
             {
                 _modeSpecShown.Add(slot);
             }
+        }
+    }
+
+    private static string TeamText(CCSPlayerController controller) => controller.Team switch
+    {
+        SwiftlyS2.Shared.Players.Team.T => "T",
+        SwiftlyS2.Shared.Players.Team.CT => "CT",
+        _ => "",
+    };
+
+    /// <summary>"9 kills" from the scoreboard's match stats; empty when the engine doesn't have them.</summary>
+    private static string KillsText(CCSPlayerController controller)
+    {
+        try
+        {
+            var kills = controller.ActionTrackingServices?.MatchStats.Kills ?? -1;
+            return kills < 0 ? "" : kills == 1 ? "1 kill" : $"{kills} kills";
+        }
+        catch (Exception)
+        {
+            return "";
         }
     }
 

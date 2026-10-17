@@ -8,6 +8,7 @@ using SwiftlyS2.Shared;
 
 using CSRoll.Config;
 using CSRoll.Core;
+using CSRoll.Hud;
 using CSRoll.Services.Impl;
 using CSRoll.Services.Interfaces;
 
@@ -18,12 +19,16 @@ public partial class CSRoll : BasePlugin
 {
     // Single source of truth for the version - also referenced in the PluginMetadata attribute
     // above and logged on every load, so the running build is always identifiable in the console.
-    private const string PluginVersion = "1.37.3-arcfrag.1";
+    private const string PluginVersion = "1.43.0-arcfrag.1";
 
     private IServiceProvider _serviceProvider = null!;
     private ICvarRollbackService _cvarService = null!;
+    private CustomHudService? _customHud;
     private bool _isLoaded;
     private IDisposable? _configChangeSubscription;
+
+    /// <summary>config.jsonc's text as of the last load - a change notification for the same text is the echo of a load already done.</summary>
+    private string? _appliedConfigText;
 
     public CSRollConfig Config { get; private set; } = new();
     public ModifierRuntime Runtime { get; private set; } = null!;
@@ -32,8 +37,29 @@ public partial class CSRoll : BasePlugin
     {
     }
 
+    /// <summary>The "Random Perk" tab of ArcfragCore's !admin panel and the !arc This match lines (contract 0.15.0).</summary>
+    private Integration.RandomPerkModeAdmin? _modeAdmin;
+
     public override void ConfigureSharedInterface(IInterfaceManager interfaceManager)
     {
+        try
+        {
+            AddModeAdmin(interfaceManager);
+        }
+        catch (Exception error) when (error is FileNotFoundException or FileLoadException or TypeLoadException or MissingMethodException)
+        {
+            // ArcfragCore.Contract missing or older than 0.12.0 (no IPlatformModeAdmin): no Random Perk tab, !rollmenu still works.
+            Core.Logger.LogWarning(error, "[CSRoll] ArcfragCore.Contract has no IPlatformModeAdmin - the !admin Random Perk tab needs ArcfragCore 0.36.0");
+        }
+    }
+
+    /// <summary>The only method naming IPlatformModeAdmin here; not inlined, so a missing assembly fails here.</summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private void AddModeAdmin(IInterfaceManager interfaceManager)
+    {
+        _modeAdmin ??= new Integration.RandomPerkModeAdmin(this, Core);
+        interfaceManager.AddSharedInterface<Arcfrag.Core.Contract.IPlatformModeAdmin, Integration.RandomPerkModeAdmin>(
+            Arcfrag.Core.Contract.PlatformCoreCapabilities.PlatformModeAdminName, _modeAdmin);
     }
 
     /// <summary>ArcfragCore's mode HUD (Arcfrag UI addon), or null - kept here because Load() can rebuild Runtime.</summary>
@@ -107,10 +133,19 @@ public partial class CSRoll : BasePlugin
 
         Runtime = new ModifierRuntime(Core, Config, _cvarService);
         Runtime.ModeHud = _modeHud;
+        _modeAdmin?.Reset();
         Runtime.Initialise(BuildModifierFactories());
+
+        // Installed even while CustomHud.Enabled is false: it does nothing until the config turns it
+        // on, and that way a config reload can switch the HUD on without a plugin reload.
+        _customHud = new CustomHudService(Core, Runtime);
+        Runtime.CustomHud = _customHud;
+        _customHud.Install();
 
         InitializeCommands();
         InitializeGameEvents();
+        InitializeConVars();
+        InitializeAdmin();
 
         Core.Logger.LogInformation("[CSRoll] Successfully loaded! Version {Version} ({Count} modifiers registered)", PluginVersion, Runtime.RegisteredModifiers.Count);
     }
@@ -118,8 +153,16 @@ public partial class CSRoll : BasePlugin
     public override void Unload()
     {
         _isLoaded = false;
+        UninitializeConVars();
         UninitializeCommands();
         UninitializeGameEvents();
+        _customHud?.Uninstall();
+        if (Runtime is not null)
+        {
+            Runtime.CustomHud = null;
+        }
+
+        _customHud = null;
         Runtime?.Unregister();
         _cvarService?.Uninstall();
         CSRollUtils.ClearXrayVision();
@@ -139,14 +182,48 @@ public partial class CSRoll : BasePlugin
             .Configure(builder => builder.AddJsonFile("config.jsonc", optional: false, reloadOnChange: true));
 
         ReloadConfigFromManager();
-        _configChangeSubscription = ChangeToken.OnChange(() => Core.Configuration.Manager.GetReloadToken(), ReloadConfigFromManager);
+        _configChangeSubscription = ChangeToken.OnChange(() => Core.Configuration.Manager.GetReloadToken(), OnConfigChanged);
+    }
+
+    /// <summary>
+    /// The configuration's reload token fired: the file watcher saw config.jsonc change (on a background
+    /// thread, a moment after the write), or a reload in this plugin raised it synchronously. Either way
+    /// the reload runs on the main thread, where everything it touches lives - and only when the file
+    /// holds something not yet loaded. A save from the admin panel or !rollmode reloads straight away,
+    /// so the watcher's echo of it ~250 ms later is skipped instead of binding a fresh config over any
+    /// change made since.
+    /// </summary>
+    private void OnConfigChanged()
+    {
+        Core.Scheduler.NextWorldUpdate(() =>
+        {
+            if (!_isLoaded || (ReadConfigText() is { } text && text == _appliedConfigText))
+            {
+                return;
+            }
+
+            ReloadConfigFromManager();
+        });
+    }
+
+    private string? ReadConfigText()
+    {
+        try
+        {
+            return File.ReadAllText(Core.Configuration.GetConfigPath("config.jsonc"));
+        }
+        catch (Exception)
+        {
+            return null;
+        }
     }
 
     private void ReloadConfigFromManager()
     {
+        _appliedConfigText = ReadConfigText();
         var newConfig = Core.Configuration.Manager.GetSection("Main").Get<CSRollConfig>() ?? new CSRollConfig();
         var disabledModifiersChanged = Runtime is not null &&
-            !Config.DisabledModifiers.SequenceEqual(newConfig.DisabledModifiers, StringComparer.OrdinalIgnoreCase);
+            !new HashSet<string>(Config.DisabledModifiers, StringComparer.OrdinalIgnoreCase).SetEquals(newConfig.DisabledModifiers);
 
         Config = newConfig;
         CSRollUtils.SetTitlePrefix(newConfig.BannerText);
@@ -162,9 +239,16 @@ public partial class CSRoll : BasePlugin
             // take effect on a running server, permanently stuck at whatever was live on last Load().
             Runtime.MinRandomRounds = newConfig.MinRandomRounds;
             Runtime.MaxRandomRounds = newConfig.MaxRandomRounds;
+
+            // The admin panel's "unsaved" is measured against the file - taken before the overrides below.
+            TakeAdminBaseline();
+
+            // csr_ convars set from the console or a .cfg keep overriding the reloaded file.
+            ReapplyConVarOverrides();
         }
 
-        if (disabledModifiersChanged)
+        // The admin panel syncs registration itself after its own reloads.
+        if (disabledModifiersChanged && !_adminReloadingConfig)
         {
             // Bug fix: this used to point admins at !reloadmodifiers, which has been removed (it only
             // rebuilt the registered-modifier list/pool - not something day-to-day admin usage needs,

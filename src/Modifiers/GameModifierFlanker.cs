@@ -6,6 +6,7 @@ using SwiftlyS2.Shared.Natives;
 using SwiftlyS2.Shared.Players;
 
 using CSRoll.Core;
+using CSRoll.Hud;
 
 namespace CSRoll.Modifiers;
 
@@ -226,16 +227,26 @@ public sealed class GameModifierFlanker : GameModifierBase
             return;
         }
 
-        // Stay off the center-HTML surface while the roll's own reveal owns it - see
-        // ModifierRuntime.IsModifierHudSuppressed.
+        _lastHtmlUpdateTime[player.Slot] = now;
+
+        var remaining = _nextAvailableTime.GetValueOrDefault(player.Slot, now) - now;
+        var cooldown = Math.Max(0.01f, Math.Max(Runtime.Config.Flanker.CooldownSeconds, Runtime.Config.Flanker.RoundStartCooldownSeconds));
+        SetGauge(player.Slot, remaining > 0f
+            ? new HudGauge("Flanker", $"{remaining:0.0}s", 1f - Math.Clamp(remaining / cooldown, 0f, 1f))
+            : new HudGauge("Flanker", "Ready · Inspect", 1f, Ready: true));
+
+        SetStatus(player.Slot, remaining > 0f
+            ? new ModeHudWidget(ModeHudWidgetKind.Ability, HudTitle, ModifierLook.Seconds(remaining), "Cooldown",
+                ModifierLook.Percent((cooldown - remaining) / cooldown), ModeHudState.Cooldown, Key: "F")
+            : new ModeHudWidget(ModeHudWidgetKind.Ability, HudTitle, "READY", "Press F", 100, ModeHudState.Ready, Key: "F"));
+
+        // The center-HTML block stays off the surface while the roll's own reveal owns it (see
+        // ModifierRuntime.IsModifierHudSuppressed); the gauge above has no such conflict.
         if (Runtime.IsModifierHudSuppressed)
         {
             return;
         }
 
-        _lastHtmlUpdateTime[player.Slot] = now;
-
-        var remaining = _nextAvailableTime.GetValueOrDefault(player.Slot, now) - now;
         var statusLine = remaining > 0f
             ? $"<span color=\"red\" class=\"fontWeight-Bold\">Cooldown: {remaining:0.0}s</span>".Replace('.', ',')
             : "<span color=\"gold\" class=\"fontWeight-Bold\">Ready</span>";
@@ -245,12 +256,6 @@ public sealed class GameModifierFlanker : GameModifierBase
                    statusLine;
 
         SetHud(player.Slot, html);
-
-        var cooldown = Math.Max(0.01f, Runtime.Config.Flanker.CooldownSeconds);
-        SetStatus(player.Slot, remaining > 0f
-            ? new ModeHudWidget(ModeHudWidgetKind.Ability, HudTitle, ModifierLook.Seconds(remaining), "Cooldown",
-                ModifierLook.Percent((cooldown - remaining) / cooldown), ModeHudState.Cooldown, Key: "F")
-            : new ModeHudWidget(ModeHudWidgetKind.Ability, HudTitle, "READY", "Press F", 100, ModeHudState.Ready, Key: "F"));
     }
 
     private void OnClientDisconnected(IOnClientDisconnectedEvent @event)

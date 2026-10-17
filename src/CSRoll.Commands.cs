@@ -1,10 +1,14 @@
+using System.Text.RegularExpressions;
+
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
 using SwiftlyS2.Shared.Commands;
 using SwiftlyS2.Shared.Misc;
 
+using CSRoll.Config;
 using CSRoll.Core;
+using CSRoll.Hud;
 using CSRoll.Modifiers;
 
 namespace CSRoll;
@@ -55,11 +59,16 @@ public partial class CSRoll
         _commandGuids.Add(Core.Command.RegisterCommand("disablemodifier", Debounce("disablemodifier", OnDisableModifier), registerRaw: true, permission: AdminPermission, helpText: "<modifier name> - Deactivate a modifier and remove it from the registered pool so it can't be added/rolled again until re-enabled (!rollmenu) or the plugin reloads."));
         _commandGuids.Add(Core.Command.RegisterCommand("randomrounds", Debounce("randomrounds", OnRandomRounds), registerRaw: true, permission: AdminPermission, helpText: "Toggle random rounds on/off."));
         _commandGuids.Add(Core.Command.RegisterCommand("randomroundsreroll", Debounce("randomroundsreroll", OnRandomRoundsReRoll), registerRaw: true, permission: AdminPermission, helpText: "Re-roll the current random round modifiers and apply them to the current round."));
+        _commandGuids.Add(Core.Command.RegisterCommand("rollmode", Debounce("rollmode", OnRollMode), registerRaw: true, permission: AdminPermission, helpText: "[player|team|game] - How random rounds hand out modifiers: each player their own, one per team, or one for everyone. Saved to config.jsonc."));
+        _commandGuids.Add(Core.Command.RegisterCommand("rollmethod", Debounce("rollmethod", OnRollMode), registerRaw: true, permission: AdminPermission, helpText: "[player|team|game] - Same as !rollmode."));
+        _commandGuids.Add(Core.Command.RegisterCommand("rollsim", Debounce("rollsim", OnRollSim), registerRaw: true, permission: AdminPermission, helpText: "[rolls] - Simulates that many single picks (default 10000) and prints how often each rarity tier came up."));
         _commandGuids.Add(Core.Command.RegisterCommand("rolldebug", Debounce("rolldebug", OnRollDebug), registerRaw: true, permission: AdminPermission, helpText: "Toggle whether per-player random-round assignments are reported to admins in chat."));
         _commandGuids.Add(Core.Command.RegisterCommand("rollreload", Debounce("rollreload", OnRollReload), registerRaw: true, permission: AdminPermission, helpText: "Reload config.jsonc from disk without restarting the plugin or resetting active modifiers."));
         _commandGuids.Add(Core.Command.RegisterCommand("memodifier", Debounce("memodifier", OnMeModifier), registerRaw: true, permission: AdminPermission, helpText: "<modifier name> - Apply a modifier scoped to just yourself, without affecting anyone else."));
         _commandGuids.Add(Core.Command.RegisterCommand("rolltestall", Debounce("rolltestall", OnRollTestAll), registerRaw: true, permission: AdminPermission, helpText: "[seconds] - Applies every registered modifier to you one at a time, announcing each on and off, so broken ones can be spotted. Run again to stop."));
         _commandGuids.Add(Core.Command.RegisterCommand("rollhelp", Debounce("rollhelp", OnRollHelp), registerRaw: true, helpText: "Prints every available Random Perk command."));
+        _commandGuids.Add(Core.Command.RegisterCommand("hud", Debounce("hud", OnHud), registerRaw: true, helpText: "Switch between the new CSRoll HUD and the centre-text HUD (needs the HUD addon). Remembered for next time."));
+        _commandGuids.Add(Core.Command.RegisterCommand("hudstatus", Debounce("hudstatus", OnHudStatus), registerRaw: true, permission: AdminPermission, helpText: "Reports whether the custom HUD entity is live and who is using it."));
 
         InitializeMenu();
 
@@ -199,6 +208,22 @@ public partial class CSRoll
 
         ReloadConfigFromManager();
         CSRollUtils.PrintTitleToChat(Core, context.Sender, "Config reloaded from disk.");
+    }
+
+    public void OnHud(ICommandContext context)
+    {
+        if (context.Sender is not { IsValid: true } sender)
+        {
+            CSRollUtils.PrintTitleToChat(Core, context.Sender, "Only an in-game player can switch HUDs.");
+            return;
+        }
+
+        CSRollUtils.PrintTitleToChat(Core, sender, _customHud?.Toggle(sender) ?? "The custom HUD isn't available.");
+    }
+
+    public void OnHudStatus(ICommandContext context)
+    {
+        CSRollUtils.PrintTitleToChat(Core, context.Sender, _customHud?.Status(context.Sender) ?? "The custom HUD isn't available.");
     }
 
     public void OnMeModifier(ICommandContext context)
@@ -344,6 +369,148 @@ public partial class CSRoll
         }
     }
 
+    public void OnRollMode(ICommandContext context)
+    {
+        var current = Runtime.RollMode;
+        if (context.Args.Length == 0)
+        {
+            CSRollUtils.PrintTitleToChat(Core, context.Sender, $"Roll mode: {current} - {DescribeRollMode(current)}. Change it with !rollmode player, team or game.");
+            return;
+        }
+
+        if (!CSRollConfig.TryParseRollMode(context.Args[0], out var mode))
+        {
+            CSRollUtils.PrintTitleToChat(Core, context.Sender, $"Unknown roll mode \"{context.Args[0]}\" - use player, team or game.");
+            return;
+        }
+
+        if (mode == current)
+        {
+            CSRollUtils.PrintTitleToChat(Core, context.Sender, $"Roll mode is already {mode}.");
+            return;
+        }
+
+        // Before the save: it reloads the config, which would otherwise put an old csr_rollmode override back.
+        _overriddenConVars.Remove("csr_rollmode");
+        var saved = SaveRollMode(mode, out var error);
+        if (!saved)
+        {
+            // Couldn't write the file - still switch for now, and say so.
+            Config.RollMode = mode.ToString();
+            Config.RandomizePlayers = null;
+            Core.Logger.LogWarning("[CSRoll] !rollmode couldn't save to config.jsonc: {Error}", error);
+        }
+
+        SyncConVar("csr_rollmode");
+        AnnounceRollMode(mode);
+        if (!saved)
+        {
+            CSRollUtils.PrintTitleToChat(Core, context.Sender, $"Couldn't save it to config.jsonc ({error}) - it lasts until the config reloads.");
+        }
+    }
+
+    /// <summary>
+    /// Runs the real weighted picker many times over the per-player pool and prints each tier's share,
+    /// so the rarity weights can be checked without playing a few hundred rounds. Single picks only -
+    /// cooldowns and incompatibilities, which shift a real roll a little, aren't simulated.
+    /// </summary>
+    public void OnRollSim(ICommandContext context)
+    {
+        var rolls = context.Args.Length > 0 && int.TryParse(context.Args[0], out var requested) ? Math.Clamp(requested, 100, 100_000) : 10_000;
+        var pool = Runtime.RegisteredModifiers.Where(m => m.SupportsPerPlayerRandomization).ToList();
+        if (pool.Count == 0)
+        {
+            CSRollUtils.PrintTitleToChat(Core, context.Sender, "No modifiers are registered to simulate.");
+            return;
+        }
+
+        var rarity = Config.Rarity;
+        var counts = ModifierRarity.Tiers.ToDictionary(tier => tier, _ => 0);
+        var random = new Random();
+        for (var i = 0; i < rolls; i++)
+        {
+            counts[ModifierRarity.Resolve(ModifierRarity.PickWeighted(pool, rarity, random)!, rarity)]++;
+        }
+
+        CSRollUtils.PrintTitleToChat(Core, context.Sender, $"{rolls} simulated picks{(rarity.Enabled ? "" : " (rarity is off - uniform)")}:");
+        foreach (var tier in ModifierRarity.Tiers.Reverse())
+        {
+            var members = pool.Count(m => ModifierRarity.Resolve(m, rarity) == tier);
+            var line = $"• {ModifierRarity.ChatToken(tier)}{ModifierRarity.Label(tier)}[default]: {100.0 * counts[tier] / rolls:0.0}%  ({members} modifiers, weight {ModifierRarity.Weight(tier, rarity):0.#})";
+            if (context.Sender is { } sender)
+            {
+                sender.SendChat(SwiftlyS2.Shared.Helper.Colored(line));
+            }
+            else
+            {
+                Core.Logger.LogInformation("[CSRoll] {Line}", line);
+            }
+        }
+    }
+
+    private static string DescribeRollMode(ModifierRollMode mode) => mode switch
+    {
+        ModifierRollMode.Team => "each team shares one roll",
+        ModifierRollMode.Game => "everyone gets the same roll",
+        _ => "every player rolls their own",
+    };
+
+    /// <summary>Tells the admins - only them; a settings change is nothing the players need in chat.</summary>
+    private void AnnounceRollMode(ModifierRollMode mode) =>
+        CSRollUtils.PrintTitleToAdminsOnly(Core, $"Roll mode set to {mode} - {DescribeRollMode(mode)}. Takes effect from the next roll.");
+
+    /// <summary>
+    /// Writes RollMode into config.jsonc by editing that one value in the text, so the admin's comments
+    /// and formatting survive, then reloads the config so it applies straight away.
+    /// </summary>
+    private bool SaveRollMode(ModifierRollMode mode, out string error)
+    {
+        try
+        {
+            var path = Core.Configuration.GetConfigPath("config.jsonc");
+            var text = File.ReadAllText(path);
+            var entry = $"\"RollMode\": \"{mode}\"";
+
+            var existing = new Regex("\"RollMode\"\\s*:\\s*\"[^\"]*\"");
+            if (existing.IsMatch(text))
+            {
+                text = existing.Replace(text, entry, 1);
+            }
+            else if (Regex.Match(text, "\"Main\"\\s*:\\s*\\{") is { Success: true } main)
+            {
+                // A config written before 1.40 has no RollMode yet.
+                text = text.Insert(main.Index + main.Length, $"\n    {entry},");
+            }
+            else
+            {
+                error = "no \"Main\" section found";
+                return false;
+            }
+
+            // An older config's RandomizePlayers: false would turn "Player" back into "Game".
+            text = Regex.Replace(text, "\"RandomizePlayers\"\\s*:\\s*false", "\"RandomizePlayers\": true");
+
+            var temp = path + ".tmp";
+            File.WriteAllText(temp, text);
+            File.Move(temp, path, overwrite: true);
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+            return false;
+        }
+
+        // Apply now rather than waiting on the file watcher.
+        if (Core.Configuration.Manager is IConfigurationRoot configRoot)
+        {
+            configRoot.Reload();
+        }
+
+        ReloadConfigFromManager();
+        error = "";
+        return true;
+    }
+
     public void OnRollDebug(ICommandContext context)
     {
         Runtime.DebugMode = !Runtime.DebugMode;
@@ -361,6 +528,7 @@ public partial class CSRoll
         }
 
         Runtime.ToggleRandomRounds();
+        SyncConVar("csr_randomrounds");
     }
 
     public void OnRandomRoundsReRoll(ICommandContext context)

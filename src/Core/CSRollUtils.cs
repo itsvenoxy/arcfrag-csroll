@@ -622,6 +622,15 @@ public static partial class CSRollUtils
         core.PlayerManager.SendCenterHTML(html, durationMs);
     }
 
+    /// <summary>ShowMessageCentreAll for connected admins only - settings changes are their business, not the players'.</summary>
+    public static void ShowMessageCentreAdminsOnly(ISwiftlyCore core, string html, int durationMs = 5000)
+    {
+        foreach (var admin in GetAdmins(core))
+        {
+            admin.SendCenterHTML(html, durationMs);
+        }
+    }
+
     /// <summary>
     /// Builds the "Activating Modifiers" center banner: a red title, then each activated modifier on
     /// its own line. Deliberately no fontSize class (reverted after v1.32.0's larger sizing was
@@ -640,7 +649,8 @@ public static partial class CSRollUtils
     /// progress instead, which is what the reveal's scramble animation drives frame by frame - the
     /// title and modifier names are identical either way, so only the description lines move.
     /// </param>
-    public static string BuildActivatingModifiersHtml(ISwiftlyCore core, IReadOnlyCollection<GameModifierBase> modifiers, SpinRevealConfig? spinReveal = null, float? descriptionProgress = null)
+    /// <param name="rarity">When given and enabled, each name is drawn in its tier's colour instead of gold.</param>
+    public static string BuildActivatingModifiersHtml(ISwiftlyCore core, IReadOnlyCollection<GameModifierBase> modifiers, SpinRevealConfig? spinReveal = null, float? descriptionProgress = null, RarityConfig? rarity = null)
     {
         var title = modifiers.Count == 1 ? "Activating Modifier:" : "Activating Modifiers:";
         var lines = new List<string>();
@@ -654,7 +664,8 @@ public static partial class CSRollUtils
 
         foreach (var modifier in modifiers)
         {
-            lines.Add($"<span color=\"gold\" class=\"fontWeight-Bold\">{GetModifierDisplayName(core, modifier)}</span>");
+            var colour = rarity is { Enabled: true } ? ModifierRarity.Hex(ModifierRarity.Resolve(modifier, rarity)) : "gold";
+            lines.Add($"<span color=\"{colour}\" class=\"fontWeight-Bold\">{GetModifierDisplayName(core, modifier)}</span>");
 
             if (!(spinReveal?.ShowDescription ?? false))
             {
@@ -894,10 +905,10 @@ public static partial class CSRollUtils
     /// red-title/gold-name styling and sizing as BuildActivatingModifiersHtml, so the spin reads as
     /// part of the same reveal rather than a visually distinct effect that then gets swapped out.
     /// </summary>
-    public static string BuildSpinFrameHtml(string name)
+    public static string BuildSpinFrameHtml(string name, string colour = "gold")
     {
         return "<span color=\"red\" class=\"fontWeight-Bold\">Rolling...</span><br/>" +
-               $"<span color=\"gold\" class=\"fontWeight-Bold\">{name}</span>";
+               $"<span color=\"{colour}\" class=\"fontWeight-Bold\">{name}</span>";
     }
 
     /// <summary>
@@ -1084,7 +1095,7 @@ public static partial class CSRollUtils
     /// !rollactive's listing: unlike PrintModifiersToChat (used for the registered-modifier list,
     /// where scope is meaningless), each active modifier now also shows WHO it currently applies to -
     /// "Global" or specific player name(s) - since most modifiers are per-player-assigned by default
-    /// (Config.RandomizePlayers), a flat name/description list with no scope was misleading.
+    /// (Config.RollMode "Player" and "Team"), a flat name/description list with no scope was misleading.
     /// </summary>
     public static void PrintActiveModifiersToChat(ISwiftlyCore core, SwiftlyS2.Shared.Players.IPlayer? player, IReadOnlyCollection<GameModifierBase> modifiers)
     {
@@ -1141,19 +1152,25 @@ public static partial class CSRollUtils
     /// per-activation, a config-driven delay/timer, etc.) can still have its surrounding wording
     /// freely customized in the translation file while always showing the real current value(s).
     /// </summary>
-    public static string GetModifierDescription(ISwiftlyCore core, GameModifierBase modifier)
+    /// Pass a slot to show that player's own values (DynamicTextTokensFor) - the HUD does.
+    public static string GetModifierDescription(ISwiftlyCore core, GameModifierBase modifier, int? slot = null)
     {
         var description = TryLocalize(core, $"{modifier.Name}.Description", out var value) ? value : modifier.Description;
+        return SubstituteTokens(modifier, description, slot);
+    }
 
-        if (modifier.DynamicTextTokens is { } tokens)
+    /// <summary>Fills each "{token}" in text with the modifier's live DynamicTextTokens value - for one player's when a slot is given - if it has any.</summary>
+    private static string SubstituteTokens(GameModifierBase modifier, string text, int? slot = null)
+    {
+        if ((slot is { } s ? modifier.DynamicTextTokensFor(s) : modifier.DynamicTextTokens) is { } tokens)
         {
             foreach (var (token, replacement) in tokens)
             {
-                description = description.Replace($"{{{token}}}", replacement);
+                text = text.Replace($"{{{token}}}", replacement);
             }
         }
 
-        return description;
+        return text;
     }
 
     /// <summary>
@@ -1166,6 +1183,18 @@ public static partial class CSRollUtils
     /// </summary>
     public static string GetModifierDisplayName(ISwiftlyCore core, GameModifierBase modifier) =>
         TryLocalize(core, $"{modifier.Name}.DisplayName", out var value) ? value : modifier.Name;
+
+    /// <summary>
+    /// The very short line under a modifier's name in the custom HUD's list (key: "{Name}.Short" in
+    /// translations/en.jsonc), falling back to the full description. Chat colour tags are stripped -
+    /// the HUD draws plain text.
+    /// </summary>
+    public static string GetModifierShortDescription(ISwiftlyCore core, GameModifierBase modifier, int? slot = null) =>
+        StripChatColors(TryLocalize(core, $"{modifier.Name}.Short", out var value) ? SubstituteTokens(modifier, value, slot) : GetModifierDescription(core, modifier, slot));
+
+    /// <summary>Removes chat colour tags ("[green]", "[default]") from text meant for a surface that draws plain text, such as the custom HUD.</summary>
+    public static string StripChatColors(string text) =>
+        System.Text.RegularExpressions.Regex.Replace(text, @"\[[a-z]+\]", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
 
     public static bool IsWarmupActive(ISwiftlyCore core)
     {

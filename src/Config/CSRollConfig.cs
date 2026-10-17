@@ -1,4 +1,19 @@
+using System.Text.Json.Serialization;
+
 namespace CSRoll.Config;
+
+/// <summary>How a random round hands out modifiers - see CSRollConfig.RollMode.</summary>
+public enum ModifierRollMode
+{
+    /// <summary>Every player rolls their own modifier(s).</summary>
+    Player,
+
+    /// <summary>Each team rolls one set that all its players share.</summary>
+    Team,
+
+    /// <summary>One set for everyone on both teams.</summary>
+    Game,
+}
 
 public class CSRollConfig
 {
@@ -6,11 +21,11 @@ public class CSRollConfig
     public bool DisableRandomRoundsInWarmup { get; set; } = true;
     public bool ShowCentreMsg { get; set; } = true;
 
-    /// <summary>Whole-server "don't repeat" for the non-RandomizePlayers shared/global roll only - the same set from last round can't be picked again as a whole. Unrelated to PerPlayerRepeatCooldownRounds below, which is per-player and applies to the per-player roll.</summary>
+    /// <summary>Whole-server "don't repeat" for the RollMode "Game" roll only - the same set from last round can't be picked again as a whole. Unrelated to PerPlayerRepeatCooldownRounds below, which is per-player and applies to the per-player roll.</summary>
     public bool CanRepeat { get; set; } = false;
 
     /// <summary>
-    /// Per-player, per-modifier cooldown for the RandomizePlayers roll: once a specific player rolls
+    /// Per-player, per-modifier cooldown for the RollMode "Player" and "Team" rolls: once a specific player rolls
     /// a specific modifier, that SAME player can't roll that SAME modifier again for this many
     /// rounds - a different player is entirely unaffected and can still roll it next round. 0 disables
     /// this cooldown entirely (a player could roll the same modifier again as soon as next round).
@@ -33,12 +48,49 @@ public class CSRollConfig
     public string[] DisabledModifiers { get; set; } = [];
 
     /// <summary>
-    /// When true, random rounds assign each connected player their own independent random
-    /// modifier(s) (from modifiers with SupportsPerPlayerRandomization=true) instead of one
-    /// shared set applied to everyone. ConVar-driven modifiers never participate in this mode -
-    /// they touch server-wide cvars and can't hold a different value per player.
+    /// How a random round hands out modifiers (changeable in game with !rollmode, which saves it here):
+    /// "Player" (default) - every player rolls their own modifier(s).
+    /// "Team" - each team rolls one set that all its players share, with one rolled chance (Revive's
+    ///   70-90% and the like) per team; the two teams never get the same modifier.
+    /// "Game" - one set for everyone on both teams, with one rolled chance.
+    /// "Player" and "Team" draw from modifiers that can apply to single players; ConVar-driven ones
+    /// change server-wide settings, so only "Game" rolls them.
     /// </summary>
-    public bool RandomizePlayers { get; set; } = true;
+    public string RollMode { get; set; } = nameof(ModifierRollMode.Player);
+
+    /// <summary>
+    /// Replaced by RollMode in 1.40. Still read from older configs, where false meant one shared roll
+    /// for everyone - that maps to "Game" while RollMode is left at "Player". Not written to new configs.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? RandomizePlayers { get; set; }
+
+    /// <summary>The roll mode in effect: RollMode, or "Game" for an older config that set RandomizePlayers to false.</summary>
+    public ModifierRollMode ResolveRollMode()
+    {
+        var mode = TryParseRollMode(RollMode, out var parsed) ? parsed : ModifierRollMode.Player;
+        return mode == ModifierRollMode.Player && RandomizePlayers == false ? ModifierRollMode.Game : mode;
+    }
+
+    /// <summary>Reads a roll mode by name, case-insensitively, with a few obvious aliases.</summary>
+    public static bool TryParseRollMode(string? text, out ModifierRollMode mode)
+    {
+        switch (text?.Trim().ToLowerInvariant())
+        {
+            case "player" or "players" or "perplayer" or "default":
+                mode = ModifierRollMode.Player;
+                return true;
+            case "team" or "teams" or "perteam":
+                mode = ModifierRollMode.Team;
+                return true;
+            case "game" or "global" or "all" or "everyone":
+                mode = ModifierRollMode.Game;
+                return true;
+            default:
+                mode = ModifierRollMode.Player;
+                return false;
+        }
+    }
 
     /// <summary>Tunables for the RandomHealth modifier (health set to a random number in this range each activation).</summary>
     public RandomHealthConfig RandomHealth { get; set; } = new();
@@ -103,6 +155,15 @@ public class CSRollConfig
     /// <summary>Tunables for the Flanker modifier (Inspect-Weapon-triggered teleport behind a random enemy, on a cooldown).</summary>
     public FlankerConfig Flanker { get; set; } = new();
 
+    /// <summary>Tunables for the KamikazeChickens modifier (Inspect-Weapon-triggered wave of beeping chickens that run at the nearest enemy and explode as HE grenades, on a cooldown).</summary>
+    public KamikazeChickensConfig KamikazeChickens { get; set; } = new();
+
+    /// <summary>Tunables for the HumanShield modifier (carrying a hostage: slower, but hits from behind deal less damage).</summary>
+    public HumanShieldConfig HumanShield { get; set; } = new();
+
+    /// <summary>Rarity tiers (CS case style): how often each tier rolls, and which modifier sits in which tier.</summary>
+    public RarityConfig Rarity { get; set; } = new();
+
     /// <summary>
     /// Modifiers excluded from a player's random roll unless THEIR OWN team has at least 2 players.
     ///
@@ -123,6 +184,9 @@ public class CSRollConfig
 
     /// <summary>Tunables for the persistent center-HTML popup shown to spectators, listing whatever modifiers are active on whoever they're currently observing.</summary>
     public SpectatorHudConfig SpectatorHud { get; set; } = new();
+
+    /// <summary>The Panorama HUD (roll carousel, modifier list, gauges) for players with the CSRoll HUD Workshop addon - see hud/README.md.</summary>
+    public CustomHudConfig CustomHud { get; set; } = new();
 
     /// <summary>Tunables for the ChineseGrenades ("Chinese Grenades") modifier (randomized fuse timer range applied to HE/flashbang/smoke).</summary>
     public ChineseGrenadesConfig ChineseGrenades { get; set; } = new();
@@ -260,17 +324,18 @@ public class MimicConfig
 
 public class SpeedhackConfig
 {
-    /// <summary>Movement speed multiplier (VelocityModifier mechanism).</summary>
-    public float SpeedMultiplier { get; set; } = 2.0f;
+    /// <summary>
+    /// Movement speed multiplier (VelocityModifier mechanism). Replaces the old SpeedMultiplier (2.0),
+    /// renamed so existing config files pick up this 15% slower default instead of keeping 2.0.
+    /// </summary>
+    public float RunSpeedMultiplier { get; set; } = 1.7f;
 
     /// <summary>
-    /// Zeroes CCSPlayer_MovementServices.Stamina every tick, so jumping doesn't strip the speed
-    /// bonus away. Stamina is CS2's own jump/land fatigue value - it rises on every jump and landing
-    /// and reduces max speed until it decays, which is why a boosted player visibly slows the moment
-    /// they leave the ground. GameModifierBunnyHop already zeroes it for exactly this reason; this
-    /// applies the same proven fix to Speedhack. Turn off to keep vanilla jump fatigue.
+    /// Keeps the boosted speed through jumps: lifts CS2's anti-bunnyhop jump speed cap and its
+    /// jump/landing fatigue for the Speedhack player only (per-player convars, like BunnyHop). Off:
+    /// jumping drops them back to about normal speed. Replaces RemoveJumpStaminaPenalty.
     /// </summary>
-    public bool RemoveJumpStaminaPenalty { get; set; } = true;
+    public bool KeepSpeedWhenJumping { get; set; } = true;
 }
 
 public class RandomHealthConfig
@@ -300,8 +365,11 @@ public class SmallPlayersConfig
 
 public class HeavyBootsConfig
 {
-    /// <summary>Movement speed multiplier (VelocityModifier mechanism) - below 1.0 to feel "heavy".</summary>
-    public float SpeedMultiplier { get; set; } = 0.5f;
+    /// <summary>
+    /// Movement speed multiplier (VelocityModifier mechanism) - below 1.0 to feel "heavy". Replaces the
+    /// old SpeedMultiplier (0.5), renamed so existing config files pick up this faster default.
+    /// </summary>
+    public float RunSpeedMultiplier { get; set; } = 0.75f;
 
     /// <summary>Armor value granted (full kevlar+helmet) to compensate for the reduced mobility.</summary>
     public int ArmorValue { get; set; } = 100;
@@ -312,16 +380,32 @@ public class HeavyBootsConfig
 
 public class JetpackConfig
 {
-    /// <summary>Upward velocity (units/sec) applied on the initial jump off the ground - CS2's own default is ~301.</summary>
-    public float JumpVelocityZ { get; set; } = 350f;
+    /// <summary>
+    /// Upward thrust, in units/sec², the moment thrust starts. Gravity (sv_gravity, 800 by default)
+    /// keeps pulling the other way, so only the part above it actually lifts - at 960 the climb starts
+    /// gently. Thrust then builds toward ThrustAccelerationMax. Lowered 20% from 1200 after live
+    /// testing found the build-up too strong.
+    /// </summary>
+    public float ThrustAccelerationStart { get; set; } = 960f;
 
-    /// <summary>Minimum seconds between initial-jump boosts, per player - stops spamming jump instead of holding it from re-triggering the big boost repeatedly and bypassing fuel entirely. Sustained lift while holding jump is unaffected; that's the separate, uncapped-duration thrust mechanic (ThrustSpeed).</summary>
-    public float BigBoostCooldownSeconds { get; set; } = 0.75f;
+    /// <summary>Upward thrust, in units/sec², once thrust has been held for ThrustRampUpSeconds. Lowered 20% from 2400 after live testing found it too high.</summary>
+    public float ThrustAccelerationMax { get; set; } = 1920f;
 
-    /// <summary>Vertical speed (units/sec) floored while holding jump in the air with fuel remaining - a gentle lift, not a sustained full jump.</summary>
-    public float ThrustSpeed { get; set; } = 140f;
+    /// <summary>
+    /// Extra upward acceleration (units/sec²) on top of the thrust, only while FALLING, and never
+    /// enough to turn the fall into a climb on its own. This is the "soften the fall" part: it applies
+    /// at full strength from the first tick of a press, so quick taps on jump fan a fall down to a soft
+    /// landing without making the jetpack climb any harder.
+    /// </summary>
+    public float FallBrakeAcceleration { get; set; } = 1500f;
 
-    /// <summary>Hard cap on upward velocity the thrust will ever floor to - keeps repeated thrust from stacking indefinitely on top of the initial jump boost.</summary>
+    /// <summary>Every jump press in mid-air thrusts for at least this long (seconds), even if released sooner, so rapid tapping registers as a series of puffs instead of being lost between server ticks.</summary>
+    public float TapPuffSeconds { get; set; } = 0.1f;
+
+    /// <summary>Seconds of continuous thrust to build from ThrustAccelerationStart up to ThrustAccelerationMax. Releasing jump starts the build-up over.</summary>
+    public float ThrustRampUpSeconds { get; set; } = 0.5f;
+
+    /// <summary>Thrust never pushes upward speed past this (units/sec). An already-faster climb is left alone rather than slowed down.</summary>
     public float MaxVerticalSpeed { get; set; } = 400f;
 
     /// <summary>Multiplier applied to CS2's normal air-accelerate value while airborne, for stronger in-flight steering during thrust.</summary>
@@ -345,8 +429,22 @@ public class JetpackConfig
 
 public class BunnyHopConfig
 {
-    /// <summary>Upward velocity (units/sec) applied on each auto-triggered jump while holding jump and grounded - CS2's own normal jump impulse is ~301, matched here since this is meant to feel like normal bhop, not a boosted jump.</summary>
-    public float JumpVelocityZ { get; set; } = 301f;
+    /// <summary>Horizontal speed (units/sec) added on every hop, along the direction the player is already moving. 0 turns the speed gain off and leaves plain auto-bhop. Lowered from 30 after live testing found speed built up too fast.</summary>
+    public float SpeedGainPerJump { get; set; } = 20f;
+
+    /// <summary>The speed gain stops adding once horizontal speed reaches this (units/sec). It never slows anyone down - speed gained by air-strafing past it is kept. Lowered from 1000 alongside SpeedGainPerJump.</summary>
+    public float MaxHopSpeed { get; set; } = 800f;
+
+    /// <summary>sv_airaccelerate for the BunnyHop player only (CS2's default is 12). Higher makes air-strafing turn sharper and gain speed faster.</summary>
+    public float AirAccelerate { get; set; } = 1000f;
+
+    /// <summary>
+    /// Applies the CS2Fixes "ServerMovementUnlock" patch while BunnyHop is active, removing CS2's
+    /// ground speed clamp so landing doesn't cut gained speed back to normal running speed. It is a
+    /// patch to the server binary, so it applies to EVERY player while BunnyHop is active (only
+    /// hold-to-hop and the speed gain are per-player). Friction still slows anyone who isn't hopping.
+    /// </summary>
+    public bool MovementUnlocker { get; set; } = true;
 }
 
 public class AtomicExplosionsConfig
@@ -358,13 +456,20 @@ public class AtomicExplosionsConfig
 public class IncreasedSpreadConfig
 {
     /// <summary>
-    /// Flat accuracy penalty forced onto the assigned player's currently held weapon every tick.
-    /// Bug fix: this defaulted to 15 - CCSWeaponBase.AccuracyPenalty normally only ranges roughly
-    /// 0-2 even during a full-auto spray, so forcing it to 15 every tick made bullets land
-    /// essentially at random regardless of aim, reported as far too strong. Lowered to a value that
-    /// still clearly and noticeably worsens accuracy without making the weapon unusable.
+    /// Inaccuracy forced onto the assigned player's held weapon every tick (CCSWeaponBase's
+    /// AccuracyPenalty), in the weapon's own units: roughly the tangent of the widest angle a bullet
+    /// can stray. For scale, a standing rifle sits around 0.005, a rifle fired while running around
+    /// 0.15, while jumping around 0.4. 0.15 is "always shooting like you're running": a bullet strays up
+    /// to ~8.5 degrees, still fine up close and a spray at range.
+    ///
+    /// Bug fix: renamed from AccuracyPenalty so stale values stop applying. The old doc assumed the
+    /// field "normally ranges 0-2", so the default went 15, then 2, then 1.15 - up to ~86, ~63 and ~49
+    /// degrees of stray. SwiftlyS2 only writes config.jsonc when it doesn't exist yet and never updates
+    /// it, so whichever of those was the default when a server's file was created was still in force
+    /// ("still shoots 80 degrees while standing still"). A new key name means the file's old value is
+    /// simply ignored and this default applies.
     /// </summary>
-    public float AccuracyPenalty { get; set; } = 1.15f;
+    public float Inaccuracy { get; set; } = 0.15f;
 }
 
 public class PoisonousSmokeConfig
@@ -419,7 +524,7 @@ public class ClusterGrenadesConfig
     /// <summary>Most mini grenades a detonation can split into (inclusive) - rolled fresh per detonation, so one HE could split into 2 while a smoke thrown moments later splits into 4.</summary>
     public int MaxClusterCount { get; set; } = 4;
 
-    /// <summary>Outward toss speed given to each spawned mini grenade.</summary>
+    /// <summary>Outward toss speed given to each spawned mini grenade (each mini varies +/-25% around it, and is lofted upward at half this speed).</summary>
     public float ClusterSpeed { get; set; } = 250f;
 }
 
@@ -480,13 +585,12 @@ public class SuicideBomberConfig
 public class ReviveConfig
 {
     /// <summary>
-    /// Minimum/maximum starting percent chance to revive instead of dying. A single value is rolled
-    /// from this range once per activation (not per revive, not per life) and used as the reset
-    /// point every spawn. Deliberately high by design - see the multiplicative decay below for why
-    /// this doesn't make Revive overpowered.
+    /// Percent chance to revive instead of dying, at the start of every life. Each successful revive
+    /// then multiplies it by a random 0.1-0.9, so it starts near-certain and gets less reliable the
+    /// more times it has saved you this life. Replaces the old MinBasePercent/MaxBasePercent range
+    /// (renamed so existing config files pick up this default instead of keeping their old 70-90).
     /// </summary>
-    public float MinBasePercent { get; set; } = 70f;
-    public float MaxBasePercent { get; set; } = 90f;
+    public float StartChancePercent { get; set; } = 95f;
 
     /// <summary>Health the player is set to immediately after a successful revive.</summary>
     public int HealthAfterRevive { get; set; } = 50;
@@ -612,6 +716,107 @@ public class FlankerConfig
     public float DropHeight { get; set; } = 48f;
 }
 
+public class KamikazeChickensConfig
+{
+    /// <summary>Seconds before the first wave can be released at the start of each round/life.</summary>
+    public float RoundStartCooldownSeconds { get; set; } = 10f;
+
+    /// <summary>Seconds before another wave can be released after one goes out.</summary>
+    public float CooldownSeconds { get; set; } = 30f;
+
+    /// <summary>Chickens released per Inspect press.</summary>
+    public int ChickensPerWave { get; set; } = 3;
+
+    /// <summary>Seconds between one chicken of a wave and the next.</summary>
+    public float SpawnGapSeconds { get; set; } = 0.12f;
+
+    /// <summary>Seconds a chicken runs before it explodes on its own.</summary>
+    public float FuseSeconds { get; set; } = 6f;
+
+    /// <summary>A chicken explodes once it is this close to any living enemy (horizontal distance, units).</summary>
+    public float ContactRadius { get; set; } = 96f;
+
+    /// <summary>Seconds after release before shooting a chicken sets it off - so the owner can't blow themselves up by firing the instant it leaves their feet.</summary>
+    public float ArmDelaySeconds { get; set; } = 0.5f;
+
+    /// <summary>Sound event played from each chicken on every beep. A wrong name is silent rather than an error - change it here and !rollreload to try another.</summary>
+    public string BeepSoundEventName { get; set; } = "C4.PlantSound";
+
+    /// <summary>Volume of each beep.</summary>
+    public float BeepVolume { get; set; } = 1f;
+
+    /// <summary>
+    /// The C4 timer-light effect spawned on the chicken with every beep. Empty disables it. child02 is
+    /// meant to be the light's red glow - child01, layered on top in an earlier test build, read as a
+    /// white flash.
+    /// </summary>
+    public string BlinkParticlePath { get; set; } = "particles/explosions_fx/c4_timer_light_child02.vpcf";
+
+    /// <summary>An optional second effect layered with BlinkParticlePath on every beep, e.g. "particles/explosions_fx/c4_timer_light_child01.vpcf" (the white flash). Empty disables it.</summary>
+    public string BlinkSecondaryParticlePath { get; set; } = "";
+
+    /// <summary>Height above the chicken's feet the blink appears at (units).</summary>
+    public float BlinkHeight { get; set; } = 10f;
+
+    /// <summary>Running speed (units/second) in "Direct" steering - 250 is a player running with a knife out.</summary>
+    public float RunSpeed { get; set; } = 250f;
+
+    /// <summary>Each blast's damage as a share of a normal HE grenade's (0.75 = 75%).</summary>
+    public float DamageMultiplier { get; set; } = 0.75f;
+
+    /// <summary>How far (units) a running chicken spots an enemy it has a clear line to, and turns to chase them. Until then it runs the way its owner was aiming.</summary>
+    public float SeekRadius { get; set; } = 800f;
+
+    /// <summary>Also call the engine's grenade Detonate function directly when a chicken blows, in case writing the fuse alone leaves the normal ~1.5s HE delay. Experimental.</summary>
+    public bool DetonateViaInvoke { get; set; } = false;
+}
+
+public class HumanShieldConfig
+{
+    /// <summary>Movement speed multiplier while carrying the hostage (VelocityModifier mechanism, like HeavyBoots).</summary>
+    public float RunSpeedMultiplier { get; set; } = 0.75f;
+
+    /// <summary>Share of the damage the hostage takes off hits from behind (0.3 = 30% less).</summary>
+    public float BackDamageReduction { get; set; } = 0.3f;
+
+    /// <summary>
+    /// Whether the carrier sees the hostage model from their own camera. It's the same over-the-shoulder
+    /// model everyone else sees, seen from inside - off by default, since NativeCarry is meant to give
+    /// the carrier the game's own first-person carry instead. Turn it on if NativeCarry is off.
+    /// </summary>
+    public bool VisibleToCarrier { get; set; } = false;
+
+    /// <summary>
+    /// Also spawns a hidden, frozen, undamageable real hostage and sets it as the player's carried
+    /// hostage, so the game itself draws its first-person carry view and carry icon. Never applied on
+    /// hostage maps (cs_ maps), where that hostage would count as a real one for rescues and round wins.
+    /// </summary>
+    public bool NativeCarry { get; set; } = true;
+}
+
+public class RarityConfig
+{
+    /// <summary>Off: every modifier is equally likely, and the HUD shows category colours only.</summary>
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>
+    /// Each tier's share of every pick, like a case's odds: a tier is chosen by these weights (among
+    /// tiers that have something eligible), then a modifier inside it uniformly. They don't have to
+    /// add up to 100. Gold at 4 comes up for a player about once every 24 rounds.
+    /// </summary>
+    public float MilSpec { get; set; } = 34f;
+    public float Restricted { get; set; } = 30f;
+    public float Classified { get; set; } = 20f;
+    public float Covert { get; set; } = 12f;
+    public float Gold { get; set; } = 4f;
+
+    /// <summary>
+    /// Moves modifiers between tiers: modifier name -> "MilSpec", "Restricted", "Classified", "Covert"
+    /// or "Gold", e.g. { "Drunk": "Gold" }. Anything not listed keeps its built-in tier.
+    /// </summary>
+    public Dictionary<string, string> Overrides { get; set; } = new();
+}
+
 public class SpinRevealConfig
 {
     /// <summary>If false, the real modifier assignment is shown immediately with no spin-up animation.</summary>
@@ -640,7 +845,7 @@ public class SpinRevealConfig
     /// Budgeted against a standard 15s freeze time: 1s initial delay (ScheduleFreezeTimeBanner) + 4s
     /// spin + 10s reveal hold = 15s, so the popup clears exactly as the round goes live.
     ///
-    /// Note this is per-player when RandomizePlayers is on - each assigned player runs their own
+    /// Note this is per-player when RollMode is "Player" - each assigned player runs their own
     /// spin, so the message count scales with player count.
     /// </summary>
     public int SpinCount { get; set; } = 52;
@@ -740,6 +945,56 @@ public class SpinRevealConfig
 
     /// <summary>Fade colour as "R,G,B,A" (0-255 each). The default is a low-alpha white flash rather than a heavy blackout.</summary>
     public string FadeColor { get; set; } = "255,255,255,64";
+}
+
+public class CustomHudConfig
+{
+    /// <summary>
+    /// Master switch. Drawing the HUD needs the CSRoll HUD Workshop addon on the client (delivered with
+    /// AddonsManager); players without it stay on center-HTML, and in OptIn mode never even see the
+    /// prompt, so leaving this on is harmless before the addon is set up. Off: no HUD entity is
+    /// created and everyone is on center-HTML.
+    /// Arcfrag: off. The Random Perk HUD comes from ArcfragCore (IPlatformModeHud → Arcfrag UI addon),
+    /// the upstream csroll_hud layout and !hud are not used there.
+    /// </summary>
+    public bool Enabled { get; set; } = false;
+
+    /// <summary>The layout the HUD entity loads, relative to the game's panorama tree.</summary>
+    public string LayoutPath { get; set; } = "panorama/layout/custom_game/csroll_hud.xml";
+
+    /// <summary>
+    /// "Everyone" (default, opt-out): every player gets the custom HUD unless they switch back with
+    /// !hud; the choice is remembered per player. A layout cannot run scripts, so the server can't tell
+    /// who actually has the addon - a player without it would see no reveal at all, so everyone who
+    /// hasn't chosen is told once per map how to switch back.
+    /// "OptIn": everyone starts on center-HTML. Players who have the addon see a "NEW HUD READY"
+    /// prompt (players without it see nothing - their client cannot draw the layout at all) and switch
+    /// with !hud. The safer choice while AddonsManager isn't delivering the addon to everyone.
+    /// </summary>
+    public string Mode { get; set; } = "Everyone";
+
+    /// <summary>How long the "NEW HUD READY" prompt stays up after each spawn, for players who haven't chosen yet.</summary>
+    public float PromptSeconds { get; set; } = 15f;
+
+    /// <summary>How long the reveal card stays up after the carousel lands. The modifier list shows it from the moment it lands either way.</summary>
+    public float RevealHoldSeconds { get; set; } = 4f;
+
+    /// <summary>
+    /// Caption on the small bar that slides up above the reel when a roll lands - a server name, a
+    /// Discord invite. Shown exactly as written (no forced capitals, so invite codes survive), cut
+    /// at 64 characters. Empty hides the bar.
+    /// </summary>
+    public string BrandText { get; set; } = "Powered by CSRoll";
+
+    /// <summary>
+    /// Whether players on the Spectator team get the custom HUD (the list shows whoever they watch,
+    /// as "Name's Modifiers"). Turn off if spectators see nothing - then they keep the center-HTML
+    /// spectator panel. Dead players on T/CT always get it.
+    /// </summary>
+    public bool ShowToSpectatorTeam { get; set; } = true;
+
+    /// <summary>Vertical position of the modifier list under the radar: 0 (highest) to 4 (lowest), 40px apart at 1080p. Raise it if a large radar scale or the money display overlaps the list.</summary>
+    public int ListOffset { get; set; } = 0;
 }
 
 public class SpectatorHudConfig

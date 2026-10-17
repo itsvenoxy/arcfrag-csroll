@@ -6,6 +6,7 @@ using SwiftlyS2.Shared.Players;
 using SwiftlyS2.Shared.SchemaDefinitions;
 
 using CSRoll.Core;
+using CSRoll.Hud;
 
 namespace CSRoll.Modifiers;
 
@@ -54,6 +55,14 @@ namespace CSRoll.Modifiers;
 /// state-machine bug above was fixed, the gradient helper itself is dropped in favor of a plain
 /// colored span, matching how every other HUD in this codebase (e.g. Flanker's own cooldown
 /// text) already renders colored status text with no issues.
+///
+/// Bug fix: nothing checked whether a carrier was alive, so every reroll kept spinning for dead
+/// players too - tick sounds and HUD frames for a spectating corpse, ending in a strip-and-give on a
+/// pawn that wasn't playing. The shared reroll now only starts rolls for living carriers, a roll
+/// already on screen when its carrier dies is abandoned (they keep whatever weapon last landed, which
+/// the spawn handler hands back if they return), and the HUD block is cleared while they're dead. A
+/// carrier who died before their very first roll ever landed gets one the moment they're alive again,
+/// so a revive never leaves them gun-less until the next cycle.
 /// </summary>
 public sealed class GameModifierWeaponRoulette : GameModifierRemoveWeapons
 {
@@ -78,6 +87,8 @@ public sealed class GameModifierWeaponRoulette : GameModifierRemoveWeapons
     /// <summary>Arcfrag HUD only: the widget reads LANDED for a moment after a spin lands, then returns to the countdown.</summary>
     private readonly Dictionary<int, float> _landedUntil = [];
     private const float LandedDisplaySeconds = 1.5f;
+    /// <summary>Carriers seen dead since they last were alive - so the death cleanup runs once, not every tick, and the first tick alive again knows to check they're armed.</summary>
+    private readonly HashSet<int> _pausedWhileDead = [];
 
     /// <summary>
     /// -1 means "not yet scheduled". OnRoundStart's "re-apply active modifiers in case anything was
@@ -210,6 +221,7 @@ public sealed class GameModifierWeaponRoulette : GameModifierRemoveWeapons
         _lastHtmlUpdateTime.Clear();
         _spins.Clear();
         _landedUntil.Clear();
+        _pausedWhileDead.Clear();
         base.OnDisabled();
     }
 
@@ -271,7 +283,7 @@ public sealed class GameModifierWeaponRoulette : GameModifierRemoveWeapons
             // wasn't it) still to be found.
             foreach (var player in Core.PlayerManager.GetAllValidPlayers())
             {
-                if (IsAssignedTo(player.Slot))
+                if (IsAssignedTo(player.Slot) && player.IsAlive)
                 {
                     StartSpin(player);
                 }
@@ -282,6 +294,23 @@ public sealed class GameModifierWeaponRoulette : GameModifierRemoveWeapons
         {
             if (!IsAssignedTo(player.Slot))
             {
+                continue;
+            }
+
+            if (!player.IsAlive)
+            {
+                if (_pausedWhileDead.Add(player.Slot))
+                {
+                    _spins.Remove(player.Slot);
+                    ClearHud(player.Slot);
+                }
+
+                continue;
+            }
+
+            if (_pausedWhileDead.Remove(player.Slot) && !_currentWeaponName.ContainsKey(player.Slot) && !_spins.ContainsKey(player.Slot))
+            {
+                StartSpin(player);
                 continue;
             }
 
@@ -342,6 +371,7 @@ public sealed class GameModifierWeaponRoulette : GameModifierRemoveWeapons
             _currentWeaponName[player.Slot] = spin.FinalWeaponName;
 
             var remaining = Math.Max(0f, _nextRerollTime - now);
+            PublishGauge(player.Slot, spin.FinalWeaponName, remaining);
             SetHud(player.Slot, BuildStatusHtml(spin.FinalWeaponName, remaining));
             _landedUntil[player.Slot] = now + LandedDisplaySeconds;
             SetStatus(player.Slot, BuildStatus(spin.FinalWeaponName, remaining, now, player.Slot));
@@ -382,6 +412,7 @@ public sealed class GameModifierWeaponRoulette : GameModifierRemoveWeapons
         // the timer would visibly jump forward by a full interval the instant the roll started,
         // instead of counting smoothly down to zero as the new weapon lands.
         var landingRemaining = Math.Max(0f, _nextRerollTime - Runtime.Config.WeaponRoulette.RerollIntervalSeconds - now);
+        PublishGauge(player.Slot, randomName, landingRemaining);
         SetHud(player.Slot, BuildStatusHtml(randomName, landingRemaining));
         SetStatus(player.Slot, new ModeHudWidget(ModeHudWidgetKind.Rotor, HudTitle, CSRollUtils.GetFriendlyWeaponName(randomName), "", 100,
             ModeHudState.Spinning,
@@ -405,17 +436,19 @@ public sealed class GameModifierWeaponRoulette : GameModifierRemoveWeapons
         // spin frames in AdvanceSpin: the spin is a short one-off tied to real gameplay timing (the
         // weapon actually changes when it lands), and half-suppressing it would leave the animation
         // visibly truncated. This idle HUD is the one that would genuinely fight the reveal.
+        _lastHtmlUpdateTime[player.Slot] = now;
+
+        var weaponName = _currentWeaponName.GetValueOrDefault(player.Slot, "-");
+        var remaining = Math.Max(0f, _nextRerollTime - now);
+        PublishGauge(player.Slot, weaponName, remaining);
+        SetStatus(player.Slot, BuildStatus(weaponName, remaining, now, player.Slot));
+
         if (Runtime.IsModifierHudSuppressed)
         {
             return;
         }
 
-        _lastHtmlUpdateTime[player.Slot] = now;
-
-        var weaponName = _currentWeaponName.GetValueOrDefault(player.Slot, "-");
-        var remaining = Math.Max(0f, _nextRerollTime - now);
         SetHud(player.Slot, BuildStatusHtml(weaponName, remaining));
-        SetStatus(player.Slot, BuildStatus(weaponName, remaining, now, player.Slot));
     }
 
     /// <summary>Arcfrag HUD widget between spins: the weapon with the countdown (bar drains to the next swap), LANDED right after a spin.</summary>
@@ -456,11 +489,20 @@ public sealed class GameModifierWeaponRoulette : GameModifierRemoveWeapons
                $"<span color=\"orange\" class=\"fontWeight-Bold {CSRollUtils.MonoFontClass}\">{timer}</span>";
     }
 
+    /// <summary>The custom HUD's readout: the weapon (flickering through names during a roll, like the center-HTML block) and the countdown to the next reroll.</summary>
+    private void PublishGauge(int slot, string weaponName, float secondsRemaining)
+    {
+        var friendlyName = weaponName == "-" ? "No weapon yet" : CSRollUtils.GetFriendlyWeaponName(weaponName);
+        var interval = Math.Max(0.01f, Runtime.Config.WeaponRoulette.RerollIntervalSeconds);
+        SetGauge(slot, new HudGauge("Weapon Roulette", $"{friendlyName} · {secondsRemaining:0.0}s", 1f - Math.Clamp(secondsRemaining / interval, 0f, 1f)));
+    }
+
     private void OnClientDisconnected(IOnClientDisconnectedEvent @event)
     {
         _currentWeaponName.Remove(@event.PlayerId);
         _lastHtmlUpdateTime.Remove(@event.PlayerId);
         _spins.Remove(@event.PlayerId);
         _landedUntil.Remove(@event.PlayerId);
+        _pausedWhileDead.Remove(@event.PlayerId);
     }
 }
